@@ -273,10 +273,13 @@ def main():
             "mark": float(f"{mark:.7g}"), "n_pay": n_pay, "n_missing": n_missing, "last_obs": iso_ts(last_obs_ts),
         })
 
+    # 矛盾の計数: 検査 = 0 でも金利成分でもない銘柄を 25 分以上観測できた窓、矛盾 = その中で判定と食い違った窓
+    n_checked = rng.randint(30, 60)
+    n_anom = (n_checked // 2 + 5 if args.mode == "estimated" else 25) if args.anomaly else rng.randint(0, 3)
     summary = {
         "generated": iso_ts(now_ts + 7), "last_success": iso_ts(now_ts), "collection_start": collection_start,
         "funding_mode": args.mode,
-        "anomalies_today": 25 if args.anomaly else rng.randint(0, 3), "anomaly_warn": bool(args.anomaly), "anomaly_warn_per_day": 20,
+        "anomalies_today": n_anom, "anomalies_checked_today": n_checked, "anomaly_warn": bool(args.anomaly), "anomaly_warn_ratio": 0.5, "anomaly_warn_per_day": 20,
         "missing_total": missing_total, "stale_hours": round(args.stale_hours, 1), "n_tickers": len(rows),
         "hl_fetched": now.strftime("%Y-%m-%dT00:30:00Z"), "interest_apr": 0.1095,
         "rows": rows,

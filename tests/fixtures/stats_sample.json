@@ -1,0 +1,377 @@
+{
+ "total_volume_24h": "780678552.556431",
+ "cumulative_volume": "436528183664.441878",
+ "tvl": "233829003.527935238319",
+ "open_interest": "1865329224.9673619801985901946",
+ "num_markets": 15,
+ "loss_refund": {
+  "pool_size": "0",
+  "refunded_24h": "0"
+ },
+ "listings": [
+  {
+   "ticker": "BTC-PERP",
+   "contract_type": "perpetual",
+   "name": "Bitcoin",
+   "mark_price": "80433.9531236734",
+   "volume_24h": "368352929.422218",
+   "open_interest": {
+    "long_open_interest": "95908239.71868775791937656000",
+    "short_open_interest": "89209320.82274625249933558000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.0001"
+    },
+    "next": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.0001"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "1.1450388352589006052144660000",
+   "quotes": {
+    "updated_at": "2026-10-24T23:18:56.620899199Z",
+    "base": {
+     "bid": "80417.42",
+     "ask": "80426.63"
+    },
+    "size_1k": {
+     "bid": "80417.42",
+     "ask": "80426.63"
+    },
+    "size_100k": {
+     "bid": "80417.42",
+     "ask": "80426.63"
+    },
+    "size_1m": {
+     "bid": "80410.17",
+     "ask": "80436.61"
+    }
+   }
+  },
+  {
+   "ticker": "ETH-PERP",
+   "contract_type": "perpetual",
+   "name": "Ethereum",
+   "mark_price": "2339.356436879773",
+   "volume_24h": "163439651.934871",
+   "open_interest": {
+    "long_open_interest": "67334896.485580616195717480000",
+    "short_open_interest": "57482316.718868300918592920000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.06818",
+     "interval_rate": "0.00006226"
+    },
+    "next": {
+     "annualized_rate": "0.06818",
+     "interval_rate": "0.00006226"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "1.3251507769952197765345510000"
+  },
+  {
+   "ticker": "SOL-PERP",
+   "contract_type": "perpetual",
+   "name": "Solana",
+   "mark_price": "101.4188753876811",
+   "volume_24h": "44341342.204512",
+   "open_interest": {
+    "long_open_interest": "20328923.061639420779724250000",
+    "short_open_interest": "12849075.760922342600838190000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.0001"
+    },
+    "next": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.0001"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "2.7608273009307136868275250000"
+  },
+  {
+   "ticker": "XAG-PERP",
+   "contract_type": "perpetual",
+   "name": "Silver",
+   "mark_price": "53.4937496566432",
+   "volume_24h": "2151862.113355",
+   "open_interest": {
+    "long_open_interest": "5250294.0805954544882565000000",
+    "short_open_interest": "2049421.7460786031842799000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0",
+     "interval_rate": "0"
+    },
+    "next": {
+     "annualized_rate": "0",
+     "interval_rate": "0"
+    },
+    "interval_seconds": 14400,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "5.6268255998506149245993710000"
+  },
+  {
+   "ticker": "ONG-PERP",
+   "contract_type": "perpetual",
+   "name": "Ontology Gas",
+   "mark_price": "0.0750840287870389",
+   "volume_24h": "303.944480",
+   "open_interest": {
+    "long_open_interest": "1525.3322186096923875200000000",
+    "short_open_interest": "8226.911046851357812800000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.000050"
+    },
+    "next": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.000050"
+    },
+    "interval_seconds": 14400,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "11.986570440335230628091030000"
+  },
+  {
+   "ticker": "COIN-PERP",
+   "contract_type": "perpetual",
+   "name": "Coinbase Global, Inc.",
+   "mark_price": "163.7574976651734",
+   "volume_24h": "444898.903867",
+   "open_interest": {
+    "long_open_interest": "606108.20136393360398450000000",
+    "short_open_interest": "260976.88190911804708620000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0",
+     "interval_rate": "0"
+    },
+    "next": {
+     "annualized_rate": "0",
+     "interval_rate": "0"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "5.9844588124065989149280930000"
+  },
+  {
+   "ticker": "AGLD-PERP",
+   "contract_type": "perpetual",
+   "name": "Adventure Gold",
+   "mark_price": "0.1764979098931724",
+   "volume_24h": "1403.252270",
+   "open_interest": {
+    "long_open_interest": "734.59711130755270820000000000",
+    "short_open_interest": "4004.42572254768211928"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.0001"
+    },
+    "next": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.0001"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "22.663157894736831537074792000"
+  },
+  {
+   "ticker": "ORDER-PERP",
+   "contract_type": "perpetual",
+   "name": "Orderly",
+   "mark_price": "0.0635622212566611",
+   "volume_24h": "1577053.948909",
+   "open_interest": {
+    "long_open_interest": "20184.544466585760839700000000",
+    "short_open_interest": "71261.184793411549198500000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "-25.0013",
+     "interval_rate": "-0.002854"
+    },
+    "next": {
+     "annualized_rate": "-25.0013",
+     "interval_rate": "-0.002854"
+    },
+    "interval_seconds": 3600,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "18.879138838689407322775177000"
+  },
+  {
+   "ticker": "PUFFER-PERP",
+   "contract_type": "perpetual",
+   "name": "Puffer",
+   "mark_price": "0.0306449115762452",
+   "volume_24h": "55421.657030",
+   "open_interest": {
+    "long_open_interest": "44181.493849542276643800000000",
+    "short_open_interest": "36806.006538513404276880000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "-0.02164",
+     "interval_rate": "-0.00001976"
+    },
+    "next": {
+     "annualized_rate": "-0.02164",
+     "interval_rate": "-0.00001976"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "9.789553455019556473881248000"
+  },
+  {
+   "ticker": "1000PEPE-PERP",
+   "contract_type": "perpetual",
+   "name": "Pepe",
+   "mark_price": "0.004477373407448472",
+   "volume_24h": "643223.875785",
+   "open_interest": {
+    "long_open_interest": "227188.35831532896937977600000",
+    "short_open_interest": "186701.11410435053593480000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.03238",
+     "interval_rate": "0.00002957"
+    },
+    "next": {
+     "annualized_rate": "0.03238",
+     "interval_rate": "0.00002957"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "11.1672615727830439289360000"
+  },
+  {
+   "ticker": "1000FLOKI-PERP",
+   "contract_type": "perpetual",
+   "name": "FLOKI",
+   "mark_price": "0.02323839204111293",
+   "volume_24h": "22979.214610",
+   "open_interest": {
+    "long_open_interest": "25706.644721793551328890000000",
+    "short_open_interest": "35672.13456592202614228"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "-0.009697",
+     "interval_rate": "-0.000008856"
+    },
+    "next": {
+     "annualized_rate": "-0.009697",
+     "interval_rate": "-0.000008856"
+    },
+    "interval_seconds": 28800,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "17.212894906511924603527589000"
+  },
+  {
+   "ticker": "WIF-PERP",
+   "contract_type": "perpetual",
+   "name": "dogwifhat",
+   "mark_price": "0.1831403043515175",
+   "volume_24h": "54105.160760",
+   "open_interest": {
+    "long_open_interest": "6146.5732136703470919600000000",
+    "short_open_interest": "143405.36433783317260377000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.000050"
+    },
+    "next": {
+     "annualized_rate": "0.1095",
+     "interval_rate": "0.000050"
+    },
+    "interval_seconds": 14400,
+    "next_timestamp": 1792886400
+   },
+   "base_spread_bps": "16.380883556040361080702271000"
+  },
+  {
+   "ticker": "NVDA-PERP",
+   "contract_type": "perpetual",
+   "name": "NVIDIA Corporation",
+   "mark_price": "212.2120172402599",
+   "volume_24h": "2483479.547615",
+   "open_interest": {
+    "long_open_interest": "4595628.2392609915623897600000",
+    "short_open_interest": "1888639.4956714611098572800000"
+   },
+   "funding": null,
+   "base_spread_bps": "5.6547221764608976661096550000"
+  },
+  {
+   "ticker": "COPP-SWAP",
+   "contract_type": "swap",
+   "name": "Swap on Copper Spot",
+   "mark_price": "6.566",
+   "volume_24h": "0",
+   "open_interest": {
+    "long_open_interest": "922408.554620000000000",
+    "short_open_interest": "1157564.132200000000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_long_rate": "0.1955",
+     "annualized_short_rate": "0.1955",
+     "interval_long_rate": "0.0005431",
+     "interval_short_rate": "0.0005431"
+    },
+    "next": null,
+    "interval_seconds": 86400,
+    "next_timestamp": null
+   }
+  },
+  {
+   "ticker": "XAU-SWAP",
+   "contract_type": "swap",
+   "name": "Swap on Gold Spot",
+   "mark_price": "3995.97",
+   "volume_24h": "0",
+   "open_interest": {
+    "long_open_interest": "46244481.53676120000000",
+    "short_open_interest": "2688443.58141810000000"
+   },
+   "funding": {
+    "last": {
+     "annualized_long_rate": "0.05633",
+     "annualized_short_rate": "0.02475",
+     "interval_long_rate": "0.0001565",
+     "interval_short_rate": "0.00006874"
+    },
+    "next": null,
+    "interval_seconds": 86400,
+    "next_timestamp": null
+   }
+  }
+ ]
+}

@@ -30,6 +30,7 @@ class RunResult:
     anomalies: list[str] = field(default_factory=list)
     n_rollover: int = 0
     n_new: int = 0
+    n_checked: int = 0   # 矛盾判定の対象になった窓の数(見込み値型: 0 でも金利成分でもなく 25 分以上観測できた窓)
 
 
 def rate_equal(a: str | None, b: str | None) -> bool:
@@ -81,12 +82,14 @@ def missing_rows(ticker: str, after_pay_ts: int | None, before_pay_ts: int, step
 
 
 def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: dict[str, int],
-                prev_fetch_ts: str | None, last_pay: dict[str, int], mode: str) -> RunResult:
+                prev_fetch_ts: str | None, last_pay: dict[str, int], mode: str,
+                prev_first_ts: dict[str, str] | None = None) -> RunResult:
     """1 回の取得を処理する。
     perps: model.Perp の列(has_funding のものだけ使う)。fetch_ts: この取得の時刻(ISO)。
     prev_obs: 銘柄 → 直近の観測行(dict、store.load_last_obs の結果)。
     prev_changes: 銘柄 → 現在の窓での C 行の数。prev_fetch_ts: 直前に成功した取得の時刻(全銘柄共通)。
-    last_pay: 銘柄 → 最後に記録した pay_ts。"""
+    last_pay: 銘柄 → 最後に記録した pay_ts。prev_first_ts: 銘柄 → 現在の窓の最初の観測時刻(F 行の obs_ts。無ければ prev の行から推定)。"""
+    prev_first_ts = prev_first_ts or {}
     if mode not in MODES:
         raise ValueError(f"unknown mode {mode!r}")
     r = RunResult()
@@ -115,6 +118,8 @@ def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: d
                 r.obs_rows.append(_obs(fetch_ts, t, iv, nt, rate, ann, KIND_CHANGE))
                 if mode == MODE_CONFIRMED:
                     r.anomalies.append(f"{t}: rate changed inside window {nt} ({prate}->{rate})")
+            if mode == MODE_CONFIRMED and not is_trivial_rate(prate, piv):
+                r.n_checked += 1
             continue
         if nt < pnt:
             # 時刻が戻った。窓を作り直すが FR は記録しない
@@ -140,11 +145,15 @@ def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: d
                     r.funding_rows.append(_fund(pnt, t, piv, prate, pann, ST_ESTIMATED, last_seen))
                 else:
                     r.funding_rows.append(_fund(pnt, t, piv, None, None, ST_MISSING, None))
-            # 矛盾判定: 値が動くはずの銘柄が 25 分以上動かなかった
-            first_unix = to_unix(parse_iso(prev["obs_ts"])) if prev.get("kind") == KIND_FIRST else None
-            if (prev_changes.get(t, 0) == 0 and not is_trivial_rate(prate, piv) and first_unix is not None
-                    and last_seen_unix - first_unix >= STALL_SECONDS):
-                r.anomalies.append(f"{t}: rate never moved inside window {pnt} ({prate})")
+            # 矛盾判定: 見込み値型なら窓の中で値が動くはず。0 でも金利成分でもない銘柄を 25 分以上観測できた窓を「検査」とし、
+            # その中で一度も動かなかった窓を矛盾として数える(確定値型のように振る舞った窓)。
+            # 検査した窓のうち矛盾が半分を超える日が続けば、判定が怪しい(ページに警告)。
+            if not is_trivial_rate(prate, piv):
+                first_ts = prev_first_ts.get(t) or (prev["obs_ts"] if prev.get("kind") == KIND_FIRST else None)
+                if first_ts is not None and last_seen_unix - to_unix(parse_iso(first_ts)) >= STALL_SECONDS:
+                    r.n_checked += 1
+                    if prev_changes.get(t, 0) == 0 and prev.get("kind") == KIND_FIRST:
+                        r.anomalies.append(f"{t}: rate never moved inside window {pnt} ({prate})")
             # pnt と nt − iv の間に観測の無い窓があれば欠測
             r.funding_rows.extend(missing_rows(t, pnt, nt, iv))
         else:

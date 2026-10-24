@@ -26,6 +26,15 @@ test("staleWarning: 日付が欠落・不正なら警告文", () => {
   }
 });
 
+test("anomalyWarning: anomaly_warn をそのまま使い、方式で文面が変わる", () => {
+  assert.equal(L.anomalyWarning({anomaly_warn: false, anomalies_today: 30, anomalies_checked_today: 40}), null);
+  assert.equal(L.anomalyWarning(null), null);
+  assert.equal(L.anomalyWarning({anomaly_warn: true, funding_mode: "estimated", anomalies_today: 12, anomalies_checked_today: 20, anomaly_warn_ratio: 0.5, anomaly_warn_per_day: 20}),
+               "判定(見込み値型)と矛盾する動き: 今日 12 件 / 検査 20 件(半分を超えています)");
+  assert.equal(L.anomalyWarning({anomaly_warn: true, funding_mode: "confirmed", anomalies_today: 25, anomalies_checked_today: 40, anomaly_warn_ratio: 0.5, anomaly_warn_per_day: 20}),
+               "判定(確定値型)と矛盾する動き: 今日 25 件(閾値 20)");
+});
+
 test("parsePayments: 欠測は r=null、壊れた要素は捨てる、時刻順", () => {
   const p = L.parsePayments({payments: [[200, 0.0002, "e"], [100, 0.0001, "c"], [300, null, "m"], "junk", [400, "x", "c"]]});
   assert.deepEqual(p, [{t: 100000, r: 0.0001, s: "c"}, {t: 200000, r: 0.0002, s: "e"}, {t: 300000, r: null, s: "m"}, {t: 400000, r: null, s: "m"}]);

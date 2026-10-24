@@ -48,15 +48,20 @@ def _dec2(v: str | None) -> str:
         return ""
 
 
-def load_prev_changes(paths: DataPaths, prev_obs: dict[str, dict]) -> dict[str, int]:
-    """銘柄ごとに、現在の窓(prev_obs の next_timestamp)で記録した C 行の数。直近 2 日分のログで足りる。"""
+def load_prev_changes(paths: DataPaths, prev_obs: dict[str, dict]) -> tuple[dict[str, int], dict[str, str]]:
+    """銘柄ごとに、現在の窓(prev_obs の next_timestamp)で記録した C 行の数と、窓の最初の観測時刻(F 行)。直近 2 日分のログで足りる。"""
     counts: dict[str, int] = {}
+    first: dict[str, str] = {}
     for p in iter_csv_files(paths.obs_dir, newest_first=True)[:2]:
         for r in read_csv(p):
             cur = prev_obs.get(r["ticker"])
-            if cur and r["kind"] == "C" and r["next_timestamp"] == cur["next_timestamp"]:
+            if not cur or r["next_timestamp"] != cur["next_timestamp"]:
+                continue
+            if r["kind"] == "C":
                 counts[r["ticker"]] = counts.get(r["ticker"], 0) + 1
-    return counts
+            elif r["kind"] == "F":
+                first[r["ticker"]] = r["obs_ts"]
+    return counts, first
 
 
 def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None, scheduled: _dt.datetime | None = None,
@@ -96,9 +101,9 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     row.update(n_listings=len(stats.perps) + len(stats.swaps), n_perp=len(stats.perps), n_swap=len(stats.swaps))
 
     prev_obs = load_last_obs(paths)
-    prev_changes = load_prev_changes(paths, prev_obs)
+    prev_changes, prev_first = load_prev_changes(paths, prev_obs)
     last_pay = load_last_pay(paths)
-    result = process_run(stats.perps, fetch_ts, prev_obs, prev_changes, meta.get("last_success_ts"), last_pay, mode)
+    result = process_run(stats.perps, fetch_ts, prev_obs, prev_changes, meta.get("last_success_ts"), last_pay, mode, prev_first)
 
     # 観測ログ: 行ごとの obs_ts の日付のファイルへ(L 行は前回の取得時刻なので前日のことがある)
     by_day: dict[str, list[dict]] = {}
@@ -138,6 +143,13 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
          "volume_24h": s.volume_24h, "interval_seconds": s.interval_seconds, "next_timestamp": s.next_timestamp,
          "last": s.last, "next": s.next} for s in stats.swaps]})
 
+    # 銘柄名(新規上場のときだけ変わる。取得に失敗した回の build でも名前を出せるように持つ)
+    names = {p.ticker: p.name for p in stats.perps}
+    names.update({s.ticker: s.name for s in stats.swaps})
+    names_path = Path(data_root) / "names.json"
+    if load_json(names_path, None) != names:
+        save_json(names_path, names, compact=True)
+
     # build 用の最新値(gitignore 対象)
     root = project_root or Path(data_root).parent
     cache = root / LATEST_CACHE
@@ -151,7 +163,10 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     # meta と矛盾の計数(直近 7 日分だけ持つ)
     day = day_str(fetch_ts_dt)
     ab = meta.get("anomalies_by_day") or {}
-    ab[day] = int(ab.get(day, 0)) + len(result.anomalies)
+    cur = ab.get(day) or {}
+    if not isinstance(cur, dict):
+        cur = {"n": int(cur), "checked": 0}
+    ab[day] = {"n": int(cur.get("n", 0)) + len(result.anomalies), "checked": int(cur.get("checked", 0)) + result.n_checked}
     meta["anomalies_by_day"] = {k: v for k, v in sorted(ab.items())[-7:]}
     meta["last_run_ts"] = fmt_iso(now)
     meta["last_success_ts"] = fetch_ts

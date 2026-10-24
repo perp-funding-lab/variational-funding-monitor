@@ -2,7 +2,7 @@
 /* Variational Funding Rate Monitor — 画面。
    起動時に data/summary.json と data/swaps.json を、銘柄を選んだとき(とヒートマップの OI 上位分)に data/tickers/<T>.json を読む。
    パスはすべて相対(GitHub Pages のプロジェクトパス配下でも動く)。純粋関数は lib.js(window.VFM)。時刻はすべて UTC。 */
-const {HOUR, DAY, iso, parseTs, fmtTs, staleWarning, pct, cls, esc, big, CATEGORIES, categoryLabel, intervalLabel, shortTicker,
+const {HOUR, DAY, iso, parseTs, fmtTs, staleWarning, anomalyWarning, pct, cls, esc, big, CATEGORIES, categoryLabel, intervalLabel, shortTicker,
        PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum} = VFM;
 const UP = "#34d399", DOWN = "#fb7185", CUM = "#93c5fd", GRID = "#1e293b";
 const STOP_DAYS = 2;            // 最終観測がこれより古い銘柄に「停止?」
@@ -103,10 +103,11 @@ function renderHero() {
   const mode = s.funding_mode === "confirmed" ? "確定値" : "推定値(窓の直前の値)";
   $("badges").innerHTML = [
     `最終更新 ${fmtTs(s.last_success)} UTC`, `収集開始 ${fmtTs(s.collection_start, false)}`, `銘柄数 ${num(s.n_tickers) ?? ROWS.length}`,
-    `欠測 ${num(s.missing_total) == null ? "—" : num(s.missing_total).toLocaleString()} 件`, `方式 ${mode}`, `HL 取得 ${fmtTs(s.hl_fetched)} UTC`,
+    `欠測 ${num(s.missing_total) == null ? "—" : num(s.missing_total).toLocaleString()} 件`, `矛盾 ${s.anomalies_today ?? "—"} / ${s.anomalies_checked_today ?? "—"}`,
+    `方式 ${mode}`, `HL 取得 ${fmtTs(s.hl_fetched)} UTC`,
   ].map(b => `<span class="badge">${esc(b)}</span>`).join("");
   checkStale();
-  notice("al-anom", s.anomaly_warn ? `判定(確定値型/見込み値型)と矛盾する動きが今日 ${s.anomalies_today ?? "?"} 件(閾値 ${s.anomaly_warn_per_day ?? "?"})` : null);
+  notice("al-anom", anomalyWarning(s));
 }
 function checkStale() { if (SUMMARY) notice("al-stale", staleWarning(SUMMARY.last_success, Date.now())); }
 

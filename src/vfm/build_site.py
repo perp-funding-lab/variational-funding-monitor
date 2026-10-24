@@ -83,7 +83,8 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
     hip3_equity = {c for coins in hl_universe.get("hip3", {}).values() for c in coins}
     obs = load_last_obs(paths)
     latest = load_json(project_root / LATEST_CACHE, None) or _latest_from_fallback(paths, obs)
-    names = {p["ticker"]: p.get("name") or p["ticker"] for p in latest.get("perps", [])}
+    names = dict(load_json(paths.root / "names.json", {}))
+    names.update({p["ticker"]: p["name"] for p in latest.get("perps", []) if p.get("name") and p.get("name") != p["ticker"]})
 
     # 確定 FR を銘柄ごとに
     pays: dict[str, list[tuple[int, float | None, str]]] = {}
@@ -141,12 +142,23 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
     last_ok = meta.get("last_success_ts")
     stale_h = (now - parse_iso(last_ok)).total_seconds() / 3600 if last_ok else None
     today = day_str(now)
-    anomalies_today = int((meta.get("anomalies_by_day") or {}).get(today, 0))
+    a_today = (meta.get("anomalies_by_day") or {}).get(today, 0)
+    if not isinstance(a_today, dict):
+        a_today = {"n": int(a_today or 0), "checked": 0}
+    anomalies_today, checked_today = int(a_today.get("n", 0)), int(a_today.get("checked", 0))
     warn_per_day = int(settings.get("anomaly_warn_per_day", 20))
+    warn_ratio = float(settings.get("anomaly_warn_ratio", 0.5))
+    warn_min_checked = int(settings.get("anomaly_warn_min_checked", 20))
+    if settings.get("funding_mode") == "estimated":
+        # 見込み値型: 検査した窓のうち「動かなかった」窓が半分を超えたら判定が怪しい
+        anomaly_warn = checked_today >= warn_min_checked and anomalies_today / checked_today > warn_ratio
+    else:
+        anomaly_warn = anomalies_today > warn_per_day
     summary = {
         "generated": fmt_iso(now), "last_success": last_ok, "collection_start": meta.get("collection_start"),
-        "funding_mode": settings.get("funding_mode"), "anomalies_today": anomalies_today, "anomaly_warn": anomalies_today > warn_per_day,
-        "anomaly_warn_per_day": warn_per_day, "missing_total": missing_total, "stale_hours": round(stale_h, 2) if stale_h is not None else None,
+        "funding_mode": settings.get("funding_mode"), "anomalies_today": anomalies_today, "anomalies_checked_today": checked_today,
+        "anomaly_warn": anomaly_warn, "anomaly_warn_per_day": warn_per_day, "anomaly_warn_ratio": warn_ratio,
+        "missing_total": missing_total, "stale_hours": round(stale_h, 2) if stale_h is not None else None,
         "hl_fetched": hl.get("fetched"), "interest_apr": INTEREST_APR, "n_tickers": len(rows), "rows": rows,
     }
     (out_dir / "data").mkdir(parents=True, exist_ok=True)

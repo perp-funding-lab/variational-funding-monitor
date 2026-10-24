@@ -41,6 +41,18 @@
     return null;
   }
 
+  /* 判定(確定値型 / 見込み値型)と矛盾する動きの警告。summary の anomaly_warn(サーバ側で判定)をそのまま使い、null なら警告なし */
+  function anomalyWarning(s) {
+    if (!s || !s.anomaly_warn) return null;
+    const n = s.anomalies_today ?? "?", m = s.anomalies_checked_today ?? "?";
+    if (s.funding_mode === "estimated") {
+      const ratio = Number(s.anomaly_warn_ratio);
+      const lim = (!Number.isFinite(ratio) || ratio === 0.5) ? "半分" : `${Math.round(ratio * 100)}%`;
+      return `判定(見込み値型)と矛盾する動き: 今日 ${n} 件 / 検査 ${m} 件(${lim}を超えています)`;
+    }
+    return `判定(確定値型)と矛盾する動き: 今日 ${n} 件(閾値 ${s.anomaly_warn_per_day ?? 20})`;
+  }
+
   // ───────── 表示用の文字列 ─────────
   const pct = (v, d = 2, sign = true) => (v == null || Number.isNaN(v)) ? "—" : (sign && v >= 0 ? "+" : "") + v.toFixed(d) + "%";
   const cls = v => v >= 0 ? "pos" : "neg";
@@ -117,7 +129,7 @@
     return m;
   }
 
-  return {HOUR, DAY, iso, parseTs, fmtTs, dayStart, weekStart, monthStart, nextBucket, bucketOf, STALE_HOURS, staleWarning,
+  return {HOUR, DAY, iso, parseTs, fmtTs, dayStart, weekStart, monthStart, nextBucket, bucketOf, STALE_HOURS, staleWarning, anomalyWarning,
           pct, cls, esc, big, CATEGORIES, CATEGORY_LABEL, categoryLabel, intervalLabel, shortTicker, annualize,
           PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum};
 });
