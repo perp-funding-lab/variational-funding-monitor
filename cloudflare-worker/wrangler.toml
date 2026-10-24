@@ -1,0 +1,25 @@
+name = "variational-funding-monitor-cron"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+# 公開 URL(workers.dev)は作らない。cron から GitHub Actions を起動するだけの Worker
+workers_dev = false
+preview_urls = false
+
+# src/index.js の CRON_WORKFLOW と1文字違わず一致させること
+# (controller.cron は設定値がそのまま渡るため、空白の差でも一致しなくなる)
+# 注意: Workers Free はアカウント全体で cron 5 個まで。デプロイ後に登録されたか必ず確認する
+#       (超過すると登録だけ黙って拒否され、Actions の保険 schedule だけで動く状態になる)
+[triggers]
+crons = [
+  "8,18,28,38,48,58 * * * *", # collect.yml(10 分ごと。58 分は支払直前の最終観測)
+]
+
+# 機密ではない設定値。PAT は `npx wrangler@4 secret put GITHUB_TOKEN`(scripts/set_worker_secret.sh)で別途登録する
+[vars]
+GITHUB_REPO = "__ORG__/variational-funding-monitor"
+GITHUB_REF = "main"
+WORKFLOW_FILE = "collect.yml"
+
+[observability]
+enabled = true

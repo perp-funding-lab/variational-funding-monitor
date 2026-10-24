@@ -1,0 +1,14 @@
+{
+  "funding_mode": "estimated",
+  "funding_mode_determined": {
+    "date": "2026-10-24",
+    "method": "同じ next_timestamp の窓の中で 12 分空けて 2 回取得し、金利成分(0.0000125 × 間隔の時間数)と違う値の銘柄を比べた",
+    "probe_1": "2026-10-24T23:19:15Z",
+    "probe_2": "2026-10-24T23:31:30Z",
+    "compared": 193,
+    "changed": 80,
+    "conclusion": "1 件以上変わったので見込み値型(funding.last は進行中の窓の見込み値で、窓の中で動く)"
+  },
+  "anomaly_warn_per_day": 20,
+  "stale_warn_hours": 2
+}

@@ -1,0 +1,51 @@
+name: hl-update
+
+# Hyperliquid の 7 日年率と対応表を 1 日 1 回更新する(HL のレート制限内: fundingHistory を 1.1 秒間隔)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 0 * * *"
+
+concurrency:
+  group: data-writers
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  hl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            .github
+            src
+            config
+            data/obs
+            data/hl
+          sparse-checkout-cone-mode: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: update
+        env:
+          PYTHONPATH: src
+        run: python -m vfm hl-update
+      - name: commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data/hl config/hl_mapping.csv
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -q -m "hl: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for i in 1 2 3 4; do
+            if git push origin HEAD:main; then exit 0; fi
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; exit 1; }
+            sleep $((i * 5))
+          done
+          exit 1

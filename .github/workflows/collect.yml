@@ -1,0 +1,89 @@
+name: collect
+
+# 起動: 主系は Cloudflare Worker からの workflow_dispatch(8,18,28,38,48,58 分)。schedule は保険(30 分ごと、正時と 58 分を避ける)。
+on:
+  workflow_dispatch:
+    inputs:
+      scheduled:
+        description: "予定時刻(ISO 8601 UTC。Worker が付ける。手動なら空)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "13,43 * * * *"
+
+# データを書くワークフローは直列にする(hl.yml / archive.yml と同じグループ)。取り消さず待たせる
+concurrency:
+  group: data-writers
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          # data/archive(月締めの .csv.gz)は収集には要らないので持たない(帯域の節約)
+          sparse-checkout: |
+            .github
+            src
+            config
+            site
+            data/obs
+            data/funding
+            data/snapshots
+            data/runs
+            data/hl
+          sparse-checkout-cone-mode: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: collect
+        id: collect
+        # 取得に失敗してもサイトは作り直す(ページに警告が出る)。失敗は実行ログに残る
+        continue-on-error: true
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m vfm collect --trigger "${{ github.event_name }}" \
+            --scheduled "${{ github.event.inputs.scheduled }}" \
+            --slots "${{ github.event_name == 'schedule' && '13,43' || '8,18,28,38,48,58' }}"
+
+      - name: commit and push data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data
+          if git diff --cached --quiet; then echo "no data changes"; exit 0; fi
+          git commit -q -m "data: $(date -u +%Y-%m-%dT%H:%M:%SZ) (${{ github.event_name }})"
+          for i in 1 2 3 4; do
+            if git push origin HEAD:main; then exit 0; fi
+            echo "push failed (try $i), rebasing"
+            git fetch origin main
+            git rebase origin/main || { git rebase --abort; echo "rebase conflict"; exit 1; }
+            sleep $((i * 5))
+          done
+          echo "push failed after retries"; exit 1
+
+      - name: build site data
+        env:
+          PYTHONPATH: src
+        run: python -m vfm build --out site
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
