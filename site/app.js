@@ -242,8 +242,10 @@ function frChart(el, row, pays, f, s) {
   const a = aggPayments(pays, f);
   let c = 0; const cum = a.map(p => (c += p.y || 0)), x = xs(a);
   const color = p => (p.y ?? 0) >= 0 ? UP : DOWN;
-  const traces = [{type: "bar", x, y: a.map(p => (p.y == null || p.est) ? null : p.y), name: "FR", marker: {color: a.map(color), line: {width: 0}}, hovertemplate: "FR %{y:.4f}%<extra></extra>"}];
-  if (a.some(p => p.est)) traces.push({type: "bar", x, y: a.map(p => p.est ? p.y : null), name: "FR(推定)", marker: {color: a.map(color), opacity: 0.55, line: {width: 0}}, hovertemplate: "FR(推定) %{y:.4f}%<extra></extra>"});
+  const yConf = a.map(p => (p.y == null || p.est) ? null : p.y), yEst = a.map(p => (p.y != null && p.est) ? p.y : null);
+  const traces = [];   // 値のない系列は出さない(見込み値型なら「FR」が無く、確定値型なら「FR(推定)」が無い)
+  if (yConf.some(v => v != null)) traces.push({type: "bar", x, y: yConf, name: "FR", marker: {color: a.map(color), line: {width: 0}}, hovertemplate: "FR %{y:.4f}%<extra></extra>"});
+  if (yEst.some(v => v != null)) traces.push({type: "bar", x, y: yEst, name: "FR(推定)", marker: {color: a.map(color), opacity: 0.55, line: {width: 0}}, hovertemplate: "FR(推定) %{y:.4f}%<extra></extra>"});
   traces.push({type: "scatter", mode: "lines", x, y: cum, name: "累積FR", yaxis: "y2", line: {color: CUM, width: 2}, hovertemplate: "累積 %{y:.3f}%<extra></extra>"});
   const unit = {raw: `1 回(${intervalLabel(row.interval)})`, D: "日", W: "週", M: "月"}[f] || f;
   plot(el, traces, {...LAYOUT, barmode: "overlay", bargap: 0.2,

@@ -120,7 +120,7 @@ PYTHONPATH=src python3 -m vfm build --out site          # site/data/ を作る
 SSL_CERT_FILE=/etc/ssl/cert.pem PYTHONPATH=src python3 -m vfm hl-update
 PYTHONPATH=src python3 -m vfm rebuild-funding --mode confirmed --out /tmp/confirmed.csv
 PYTHONPATH=src python3 -m vfm status
-python3 -m pytest -q && node --test tests/js/            # テスト
+python3 -m pytest -q && node --test tests/js/*.test.js   # テスト
 bash scripts/check_identifiers.sh <Organization> <リポ名> <Worker 名>   # 本人名が無いことの確認
 python3 scripts/estimate_repo_size.py --runs 288        # リポサイズの見積もり
 

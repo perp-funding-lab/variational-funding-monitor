@@ -27,6 +27,19 @@ def _f(v) -> float | None:
         return None
 
 
+def _r(v, sig: int = 6):
+    """summary.json を小さくするため、float を有効数字 sig 桁に丸める(dict / list は再帰)。"""
+    if isinstance(v, float):
+        if v == 0 or v != v:
+            return v
+        return float(f"{v:.{sig}g}")
+    if isinstance(v, dict):
+        return {k: _r(x, sig) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_r(x, sig) for x in v]
+    return v
+
+
 def cum_stat(payments: list[tuple[int, float | None, str]], now_ts: int, days: int | None, interval: int) -> dict | None:
     """payments: (pay_ts, rate or None, status) の昇順。直近 days 日(None なら全期間)の累積と年率。
     データが期間分ない銘柄は開始日からの累積を実日数で年率換算し partial を付ける。missing は足さない。"""
@@ -123,7 +136,9 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
         oi = long_oi + short_oi
         o = obs.get(t)
         data_start = day_str(from_unix(pl[0][0])) if pl else (o["obs_ts"][:10] if o else None)
-        rows.append({
+        if "/" in t or "\\" in t:
+            continue   # ファイル名に使えないティッカー(想定外)は飛ばす
+        rows.append(_r({
             "ticker": t, "name": names.get(t, t), "category": classify(t, names.get(t, ""), overrides, hl_main, hip3_equity),
             "interval": iv, "next_ts": p.get("next_timestamp"), "data_start": data_start,
             "cur_rate": cur_rate, "cur_apr": annualize(cur_rate, iv) if cur_rate is not None else None,
@@ -135,7 +150,7 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
             "oi": oi, "long_oi": long_oi, "short_oi": short_oi, "long_share": (long_oi / oi) if oi > 0 else None,
             "vol24": _f(p.get("volume_24h")), "spread_bps": _f(p.get("spread_bps")), "mark": _f(p.get("mark_price")),
             "n_pay": len(valid), "n_missing": n_missing, "last_obs": o["obs_ts"] if o else latest.get("fetch_ts"),
-        })
+        }))
         save_json(tick_dir / f"{t}.json", {"ticker": t, "interval": iv,
                                             "payments": [[ts, r, STATUS_CODE.get(s, s)] for ts, r, s in pl]}, compact=True)
     rows.sort(key=lambda r: -(r["oi"] or 0))
