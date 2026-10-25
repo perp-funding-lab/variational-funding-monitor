@@ -34,12 +34,20 @@ def _slot_time(now: _dt.datetime, slots: str) -> _dt.datetime:
 
 
 def cmd_collect(args) -> int:
+    import os
     from .collect import run_once
     root = _root(args)
     now = utc_now()
     scheduled = parse_iso(args.scheduled) if args.scheduled else (_slot_time(now, args.slots) if args.slots else None)
-    row = run_once(root / "data", _settings(root), now=now, scheduled=scheduled, trigger=args.trigger, project_root=root)
+    row = run_once(root / "data", _settings(root), now=now, scheduled=scheduled, trigger=args.trigger, project_root=root,
+                   skip_if_fresh_seconds=args.skip_if_fresh or None)
     print(json.dumps(row, ensure_ascii=False))
+    skipped = bool(row.get("skipped"))
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+            f.write(f"skipped={'true' if skipped else 'false'}\n")
+    if skipped:
+        return 0
     ok = str(row.get("http_status")) == "200" and not str(row.get("note", "")).startswith(("fetch failed", "schema error"))
     return 0 if ok else 1
 
@@ -129,6 +137,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--trigger", default="manual")
     c.add_argument("--scheduled", help="予定時刻(ISO、Worker からの dispatch に付ける)")
     c.add_argument("--slots", help="予定時刻を分の一覧から求める(例 '8,18,28,38,48,58')")
+    c.add_argument("--skip-if-fresh", type=int, default=0, metavar="SECONDS",
+                   help="直前の成功がこの秒数以内なら何もしない(保険の schedule 用)")
     c.set_defaults(fn=cmd_collect)
     b = sub.add_parser("build", help="site/data/*.json を作る")
     b.add_argument("--out")

@@ -7,7 +7,7 @@ on:
     - cron: "10 1 1 * *"
 
 concurrency:
-  group: data-writers
+  group: archive
   cancel-in-progress: false
 
 permissions:

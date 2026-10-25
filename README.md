@@ -76,12 +76,14 @@ Variational の `funding.last` が「直前に確定した値(窓の中で動か
 
 ### リポサイズの見積もり(1 年、git 履歴込み)
 
-`python scripts/estimate_repo_size.py --runs 288` が、実データの 1 回分の増分を一時リポに 288 回コミットして `git gc --aggressive` 後の pack サイズから外挿する。
+`python scripts/estimate_repo_size.py --runs 150` が、実データの 1 回分の増分を一時リポに 150 回コミットして `git gc --aggressive` 後の pack サイズから外挿する。
 
 - 1 日の窓(支払)の数: 2,709(4 時間 304 銘柄 × 6 + 8 時間 255 銘柄 × 3 + 1 時間 5 銘柄 × 24)
-- 1 回の収集で増える行: 観測ログ約 118 行(変化点 80 + 窓の最初/最後)、確定 FR 約 19 行、実行ログ 1 行、毎時スナップショット 582 行(6 回に 1 回)
-- 模擬の結果: 1 回あたり約 4.8 KB(pack)→ 52,560 回/年で約 250 MB。月締めの .csv.gz 約 9 MB × 12 = 約 110 MB、HL の JSON 約 14 MB
-- **合計 約 370 MB / 年 < 1 GB**(GitHub Pages の推奨上限)。収集ジョブは sparse checkout で `data/archive` を持たないので、毎回のチェックアウトは当月分だけ。
+- 1 回の収集で増える行: 観測ログ約 118 行(変化点 80 + 窓の最初/最後)、確定 FR 約 19 行、実行ログ 1 行、毎時スナップショット 582 行(6 回に 1 回)。
+  ほかに `meta.json` と `swaps_latest.json`(8 KB)が毎回書き換わる
+- 収集回数: Worker 経由 144 回/日。保険の schedule は直前 12 分以内に成功していれば何も書かないので、150 回/日で見積もる
+- 模擬の結果: 1 回あたり約 5.3 KB(pack)→ 54,750 回/年で約 290 MB。月締めの .csv.gz 約 9 MB × 12 = 約 110 MB、HL の JSON 約 14 MB
+- **合計 約 410 MB / 年 < 1 GB**(GitHub Pages の推奨上限)。収集ジョブは sparse checkout で `data/archive` を持たないので、毎回のチェックアウトは当月分だけ。
 
 ## ページ
 

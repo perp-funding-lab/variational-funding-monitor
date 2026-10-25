@@ -1,6 +1,7 @@
 name: collect
 
-# 起動: 主系は Cloudflare Worker からの workflow_dispatch(8,18,28,38,48,58 分)。schedule は保険(30 分ごと、正時と 58 分を避ける)。
+# 起動: 主系は Cloudflare Worker からの workflow_dispatch(8,18,28,38,48,58 分)。schedule は保険(30 分ごと、正時と 58 分を避ける。
+# 直前 12 分以内に成功していれば何もしないので、Worker が生きている間はコミットを増やさない)。
 on:
   workflow_dispatch:
     inputs:
@@ -11,9 +12,10 @@ on:
   schedule:
     - cron: "13,43 * * * *"
 
-# データを書くワークフローは直列にする(hl.yml / archive.yml と同じグループ)。取り消さず待たせる
+# 同じワークフローの同時実行を防ぐ(GitHub は実行中 1 + 待機 1 まで。3 つ目が来ると待機中の方が取り消される)。
+# hl.yml / archive.yml は別グループ(触るファイルが重ならず、push が競合しても rebase で解決できる)
 concurrency:
-  group: data-writers
+  group: collect
   cancel-in-progress: false
 
 permissions:
@@ -51,16 +53,19 @@ jobs:
 
       - name: collect
         id: collect
-        # 取得に失敗してもサイトは作り直す(ページに警告が出る)。失敗は実行ログに残る
+        # 取得に失敗してもサイトは作り直す(ページに警告が出る)。失敗は実行ログに残る。
+        # schedule(保険)は、Worker 経由の収集が 12 分以内に成功していれば何もしない(skipped=true)
         continue-on-error: true
         env:
           PYTHONPATH: src
         run: |
           python -m vfm collect --trigger "${{ github.event_name }}" \
             --scheduled "${{ github.event.inputs.scheduled }}" \
-            --slots "${{ github.event_name == 'schedule' && '13,43' || '8,18,28,38,48,58' }}"
+            --slots "${{ github.event_name == 'schedule' && '13,43' || '8,18,28,38,48,58' }}" \
+            --skip-if-fresh "${{ github.event_name == 'schedule' && '720' || '0' }}"
 
       - name: commit and push data
+        if: steps.collect.outputs.skipped != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -77,13 +82,17 @@ jobs:
           echo "push failed after retries"; exit 1
 
       - name: build site data
+        if: steps.collect.outputs.skipped != 'true'
         env:
           PYTHONPATH: src
         run: python -m vfm build --out site
 
       - uses: actions/configure-pages@v5
+        if: steps.collect.outputs.skipped != 'true'
       - uses: actions/upload-pages-artifact@v3
+        if: steps.collect.outputs.skipped != 'true'
         with:
           path: site
       - id: deploy
+        if: steps.collect.outputs.skipped != 'true'
         uses: actions/deploy-pages@v4

@@ -7,7 +7,8 @@ REPO=variational-funding-monitor
 cd "$(dirname "$0")/.."
 printf '%s' "$ORG" | grep -qi 'h[y]u' && { echo "Organization 名に本人名が含まれています"; exit 1; }
 # プレースホルダを置き換える(Worker の設定と README の URL)
-sed -i '' "s#__ORG__#${ORG}#g" cloudflare-worker/wrangler.toml README.md
+sed -i.bak "s#__ORG__#${ORG}#g" cloudflare-worker/wrangler.toml README.md   # BSD/GNU 両対応
+rm -f cloudflare-worker/wrangler.toml.bak README.md.bak
 git add cloudflare-worker/wrangler.toml README.md
 git -c commit.gpgsign=false diff --cached --quiet || git -c commit.gpgsign=false commit -q -m "Organization 名を設定
 

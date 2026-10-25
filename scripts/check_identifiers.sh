@@ -9,8 +9,11 @@ fail=0
 echo "== git log の作者・コミッター"
 n=$(git log --format='%an <%ae> / %cn <%ce>' | grep -ic "$PAT" || true)
 echo "   一致 $n 件"; [ "$n" = "0" ] || fail=1
-echo "== コード・設定・ページ・ワークフロー・README(data/ とローカル生成物は除く)"
-if grep -rIin --exclude-dir=.git --exclude-dir=data --exclude-dir=node_modules --exclude-dir=.cache \
+echo "== git のコミットメッセージ・タグ・パス名(全履歴)"
+n=$( { git log --all --format='%s%n%b'; git tag -l; git for-each-ref --format='%(contents)' refs/tags; git log --all --name-only --format=; } | grep -ic "$PAT" || true)
+echo "   一致 $n 件"; [ "$n" = "0" ] || fail=1
+echo "== コード・設定・ページ・ワークフロー・README(data/ とローカル生成物は除く。バイナリも対象)"
+if grep -rin --exclude-dir=.git --exclude-dir=data --exclude-dir=node_modules --exclude-dir=.cache \
      --exclude-dir=.wrangler --exclude-dir=.venv --exclude-dir=__pycache__ --exclude-dir=.pytest_cache "$PAT" . ; then
   fail=1
 else

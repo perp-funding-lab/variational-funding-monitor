@@ -108,20 +108,37 @@
   }
   /* 期間 [startMs, endMs] の支払い(フィルタ済み)のまとめ。欠測は合計に入れず件数だけ数える。
      年率 = 累積 ÷ 実日数 × 365。データが期間分ない(最初の支払いが start より後)なら partial。 */
-  function summarizePayments(pays, intervalSec, startMs, endMs) {
+  function summarizePayments(pays, intervalSec, startMs, endMs, firstMs) {
+    /* builder の cum_stat と同じ定義:
+       - first = 銘柄の最初の支払(firstMs。無ければ渡された列の最初)。期間の開始 startMs より後なら「データが期間分ない」
+       - その場合の年率は、経過時間ではなく支払が実際に覆う期間(最初の支払の窓の開始 〜 最後の支払)で割る(支払 2 回で 2 倍に跳ねないように)
+       - 実日数は 1 支払間隔を下限にする。partial(※)は first が startMs + 1 間隔より後のとき */
     const paid = pays.filter(p => p.r != null), r = paid.map(p => p.r), n = r.length;
     const sum = r.reduce((a, b) => a + b, 0);
     const pos = r.filter(v => v > 0).reduce((a, b) => a + b, 0), neg = r.filter(v => v < 0).reduce((a, b) => a + b, 0);
-    const first = pays.length ? pays[0].t : null;
-    // 実日数は 1 支払間隔を下限にする(builder の cum_stat と同じ。支払 1 回だけの期間で年率が跳ねないように)
-    const from = first != null ? Math.max(startMs, first) : startMs, days = Math.max((endMs - from) / DAY, intervalSec > 0 ? intervalSec / 86400 : 0);
+    const intervalMs = intervalSec > 0 ? intervalSec * 1000 : 0;
+    const first = firstMs != null ? firstMs : (pays.length ? pays[0].t : null);
+    const clamped = first != null && first > startMs;
+    const from = clamped ? first : startMs;
+    const lastPaid = paid.length ? paid[paid.length - 1].t : null;
+    let days = clamped && lastPaid != null ? (lastPaid - (first - intervalMs)) / DAY : (endMs - from) / DAY;
+    days = Math.max(days, intervalMs / DAY);
     const k = intervalSec > 0 ? 365 * 86400 / intervalSec : null;
     return {count: n, missing: pays.length - n, nEst: paid.filter(p => p.s === "e").length,
             total: sum * 100, pos: pos * 100, neg: neg * 100, neg_share: n ? r.filter(v => v < 0).length / n * 100 : NaN,
-            apr: days > 0 ? sum * 100 * 365 / days : null, days, start: first, partial: first != null && first > startMs + HOUR,
+            apr: days > 0 ? sum * 100 * 365 / days : null, days, start: first, partial: first != null && first > startMs + intervalMs,
             mean: n ? sum / n * 100 : null,
             max: n ? Math.max(...r) * 100 : null, min: n ? Math.min(...r) * 100 : null,
             maxApr: n && k ? Math.max(...r) * k * 100 : null, minApr: n && k ? Math.min(...r) * k * 100 : null};
+  }
+  /* monthly.json の 1 銘柄分 {"YYYY-MM": 合計(小数)} → Map(月初 ms → 合計 %)(monthlyCum と同じ形) */
+  function monthlyFromSummary(obj) {
+    const m = new Map();
+    for (const [k, v] of Object.entries(obj || {})) {
+      const y = Number(k.slice(0, 4)), mo = Number(k.slice(5, 7));
+      if (Number.isFinite(y) && Number.isFinite(mo) && typeof v === "number") m.set(Date.UTC(y, mo - 1, 1), v * 100);
+    }
+    return m;
   }
   /* 月ごとの累積 FR(%)。Map(月初 ms → 合計)。欠測は加えない */
   function monthlyCum(pays) {
@@ -132,5 +149,5 @@
 
   return {HOUR, DAY, iso, parseTs, fmtTs, dayStart, weekStart, monthStart, nextBucket, bucketOf, STALE_HOURS, staleWarning, anomalyWarning,
           pct, cls, esc, big, CATEGORIES, CATEGORY_LABEL, categoryLabel, intervalLabel, shortTicker, annualize,
-          PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum};
+          PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum, monthlyFromSummary};
 });

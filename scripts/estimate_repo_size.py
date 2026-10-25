@@ -11,6 +11,7 @@ import argparse
 import csv
 import gzip
 import io
+import json
 import random
 import subprocess
 import sys
@@ -20,7 +21,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from vfm.store import FUNDING_HEADER, OBS_HEADER, RUN_HEADER, SNAP_HEADER, read_csv  # noqa: E402
 
-RUNS_PER_DAY = 144
+# Worker 経由 6 回/時 = 144 回/日。保険の schedule(2 回/時)は直前 12 分以内に成功していれば何も書かないので、
+# Worker が止まっている時間帯だけ増える。余裕を見て 150 回/日とする
+RUNS_PER_DAY = 150
 DAYS = 365
 
 
@@ -55,6 +58,8 @@ def main() -> int:
 
     rnd = random.Random(1)
     c_rows = [r for r in obs if r["kind"] == "C"] or obs
+    sw_path = root / "data/swaps_latest.json"
+    swaps_latest = json.loads(sw_path.read_text()) if sw_path.exists() else None
     with tempfile.TemporaryDirectory() as td:
         d = Path(td)
         git(d, "init", "-q", "-b", "main"); git(d, "config", "user.email", "a@b"); git(d, "config", "user.name", "a")
@@ -98,6 +103,13 @@ def main() -> int:
                                                           "n_perp": 564, "n_swap": 18, "n_obs_rows": len(rows), "n_funding_rows": len(frows), "n_anomalies": 0,
                                                           "trigger": "workflow_dispatch", "note": ""}])
             (d / "data/meta.json").write_text('{"last_success_ts": "%s", "last_run_ts": "%s"}\n' % (iso, iso))
+            # swap の最新値(全件)は毎回書き換わる(価格・OI・出来高・レートが動く)
+            if swaps_latest:
+                sw = json.loads(json.dumps(swaps_latest)); sw["snap_ts"] = iso
+                for row in sw.get("rows", []):
+                    for k in ("mark_price", "long_oi", "short_oi", "volume_24h"):
+                        if row.get(k): row[k] = f"{float(row[k]) * rnd.uniform(0.97, 1.03):.10g}"
+                (d / "data/swaps_latest.json").write_text(json.dumps(sw, ensure_ascii=False, indent=1, sort_keys=True) + "\n")
             git(d, "add", "-A"); git(d, "commit", "-q", "-m", f"data: {iso}")
         git(d, "gc", "-q", "--aggressive", "--prune=now")
         pack = sum(p.stat().st_size for p in (d / ".git/objects/pack").glob("*"))

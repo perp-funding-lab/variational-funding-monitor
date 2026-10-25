@@ -76,8 +76,8 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
       "cur_rate": 0.0001, "cur_apr": 0.1095,
       "last_rate": 0.0001, "last_apr": 0.1095, "last_status": "estimated", "last_pay_ts": 1792857600,
       "apr7": null, "apr30": null,
-      "cum": {"7": {"sum": 0.0003, "apr": 0.1095, "partial": true, "start": "2026-10-25", "days": 1.0},
-              "30": {...}, "90": {...}, "180": {...}, "365": {...}, "all": {...}},
+      "cum": {"7": [0.0003, 0.1095, 1, "2026-10-25", 1.0],
+              "30": [...], "90": [...], "180": [...], "365": [...], "all": [...]},
       "hl_coin": "BTC", "hl_apr7": 0.1012, "diff_pp": 0.83,
       "oi": 7299715.0, "long_oi": 5250294.0, "short_oi": 2049421.0, "long_share": 0.72,
       "vol24": 2151862.0, "spread_bps": 5.63, "mark": 110234.0,
@@ -87,7 +87,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
 }
 ```
 - 数値はすべて有効数字 6 桁に丸める(OI や出来高のドル額も。ファイルサイズのため)。`rate`/`apr` は小数(0.0001 = 0.01%)。`diff_pp` は 7 日年率の差(Variational − HL)を %ポイントで。`cur_rate`/`cur_apr` は API がいま表示している進行中の窓の値、`last_*` は最後に記録した支払(収集開始後の最初の支払まで null)。
-- `cum[k]` は `null` の場合がある(データなし)。`apr7`/`apr30` はデータ日数不足なら `null`。
+- `cum[k]` は `[sum, apr, partial(0/1), start(YYYY-MM-DD), days]` の配列(ファイルを小さくするため。ページ側で展開)。`null` の場合がある(データなし)。`apr7`/`apr30` はデータ日数不足なら `null`。
 
 ### `tickers/<TICKER>.json`(行クリック時に読む)
 ```json

@@ -27,6 +27,10 @@ def _f(v) -> float | None:
         return None
 
 
+def _month_key(ts: int) -> str:
+    return from_unix(ts).strftime("%Y-%m")
+
+
 def _r(v, sig: int = 6):
     """summary.json を小さくするため、float を有効数字 sig 桁に丸める(dict / list は再帰)。"""
     if isinstance(v, float):
@@ -42,22 +46,24 @@ def _r(v, sig: int = 6):
 
 def cum_stat(payments: list[tuple[int, float | None, str]], now_ts: int, days: int | None, interval: int) -> dict | None:
     """payments: (pay_ts, rate or None, status) の昇順。直近 days 日(None なら全期間)の累積と年率。
-    データが期間分ない銘柄は開始日からの累積を実日数で年率換算し partial を付ける。missing は足さない。"""
+    データが期間分ない銘柄は開始日からの累積を「支払が実際に覆う期間」(最初の支払の窓の開始 〜 最後の支払)で年率換算し
+    partial を付ける(経過時間で割ると支払 2 回で 2 倍に跳ねるため)。missing は足さない。"""
     valid = [(t, r) for t, r, s in payments if s != ST_MISSING and r is not None]
     if not valid:
         return None
     first = valid[0][0]
-    if days is None:
-        frm = first
-        partial = False
-    else:
-        frm = max(now_ts - days * 86400, first)
-        partial = first > now_ts - days * 86400 + interval
-    sel = [r for t, r in valid if frm <= t <= now_ts]
+    clamped = days is None or first > now_ts - days * 86400
+    frm = first if clamped else now_ts - days * 86400
+    partial = False if days is None else first > now_ts - days * 86400 + interval
+    sel = [(t, r) for t, r in valid if frm <= t <= now_ts]
     if not sel:
         return None
-    actual = max((now_ts - frm) / 86400, interval / 86400)
-    total = sum(sel)
+    if clamped:
+        actual = (sel[-1][0] - (first - interval)) / 86400
+    else:
+        actual = (now_ts - frm) / 86400
+    actual = max(actual, interval / 86400)
+    total = sum(r for _, r in sel)
     return {"sum": total, "apr": total * 365 / actual, "partial": partial, "start": day_str(from_unix(first)), "days": round(actual, 2), "n": len(sel)}
 
 
@@ -114,9 +120,18 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
         shutil.rmtree(tick_dir)
     tick_dir.mkdir(parents=True, exist_ok=True)
 
+    # 最新の取得に無い銘柄(上場廃止・一時的な欠落)も履歴があれば残す(ページで「停止?」)
+    listed = {p["ticker"] for p in latest.get("perps", [])}
+    perps = list(latest.get("perps", []))
+    for t in sorted((set(pays) | set(obs)) - listed):
+        o = obs.get(t) or {}
+        perps.append({"ticker": t, "interval_seconds": o.get("interval_seconds") or intervals.get(t), "next_timestamp": o.get("next_timestamp"),
+                      "interval_rate": o.get("interval_rate"), "annualized_rate": o.get("annualized_rate")})
+    month_keys = sorted({_month_key(ts) for pl in pays.values() for ts, _, _ in pl})[-18:]
+    monthly: dict[str, dict] = {}
     rows = []
     missing_total = 0
-    for p in latest.get("perps", []):
+    for p in perps:
         t = p["ticker"]
         iv = int(p.get("interval_seconds") or intervals.get(t) or 0)
         if not iv:
@@ -130,6 +145,8 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
         cum = {k: cum_stat(pl, now_ts, d, iv) for k, d in PRESETS.items()}
         apr7 = cum["7"]["apr"] if cum["7"] and not cum["7"]["partial"] else None
         apr30 = cum["30"]["apr"] if cum["30"] and not cum["30"]["partial"] else None
+        # summary.json を小さくするため配列で持つ(ページ側で {sum, apr, partial, start, days} に展開する)
+        cum_compact = {k: ([c["sum"], c["apr"], 1 if c["partial"] else 0, c["start"], c["days"]] if c else None) for k, c in cum.items()}
         hl_coin = (mapping.get(t) or {}).get("hl_coin") or None
         hl_apr7 = (hl.get("coins", {}).get(hl_coin) or {}).get("apr7d") if hl_coin else None
         long_oi, short_oi = _f(p.get("long_oi")) or 0.0, _f(p.get("short_oi")) or 0.0
@@ -144,13 +161,23 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
             "cur_rate": cur_rate, "cur_apr": annualize(cur_rate, iv) if cur_rate is not None else None,
             "last_rate": last_pay[1] if last_pay else None, "last_apr": annualize(last_pay[1], iv) if last_pay else None,
             "last_status": last_pay[2] if last_pay else None, "last_pay_ts": last_pay[0] if last_pay else None,
-            "apr7": apr7, "apr30": apr30, "cum": cum,
+            "apr7": apr7, "apr30": apr30, "cum": cum_compact,
             "hl_coin": hl_coin, "hl_apr7": hl_apr7,
             "diff_pp": (apr7 - hl_apr7) * 100 if (apr7 is not None and hl_apr7 is not None) else None,
             "oi": oi, "long_oi": long_oi, "short_oi": short_oi, "long_share": (long_oi / oi) if oi > 0 else None,
             "vol24": _f(p.get("volume_24h")), "spread_bps": _f(p.get("spread_bps")), "mark": _f(p.get("mark_price")),
-            "n_pay": len(valid), "n_missing": n_missing, "last_obs": o["obs_ts"] if o else latest.get("fetch_ts"),
+            "n_pay": len(valid), "n_missing": n_missing,
+            "last_obs": o["obs_ts"] if o else (latest.get("fetch_ts") if t in listed else (day_str(from_unix(pl[-1][0])) + "T00:00:00Z" if pl else None)),
+            "listed": t in listed,
         }))
+        # 月ごとの累積(ヒートマップ用。銘柄別ファイルを 60 個読まずに済むように)
+        msum: dict[str, float] = {}
+        for ts, rr, st in valid:
+            k = _month_key(ts)
+            if k in month_keys:
+                msum[k] = msum.get(k, 0.0) + rr
+        if msum:
+            monthly[t] = _r(msum)
         save_json(tick_dir / f"{t}.json", {"ticker": t, "interval": iv,
                                             "payments": [[ts, r, STATUS_CODE.get(s, s)] for ts, r, s in pl]}, compact=True)
     rows.sort(key=lambda r: -(r["oi"] or 0))
@@ -178,6 +205,7 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
     }
     (out_dir / "data").mkdir(parents=True, exist_ok=True)
     save_json(out_dir / "data" / "summary.json", summary, compact=True)
+    save_json(out_dir / "data" / "monthly.json", {"generated": fmt_iso(now), "months": month_keys, "rows": monthly}, compact=True)
 
     sw = load_json(paths.swaps_path, {"rows": []})
     swap_rows = []
@@ -191,5 +219,5 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
         swap_rows.append({"ticker": s["ticker"], "name": s.get("name") or s["ticker"], "mark": _f(s.get("mark_price")),
                           "long_oi": lo, "short_oi": sh, "vol24": _f(s.get("volume_24h")), "interval": s.get("interval_seconds"),
                           "next_ts": s.get("next_timestamp"), "last": _conv(s.get("last")), "next": _conv(s.get("next")), "snap_ts": sw.get("snap_ts")})
-    save_json(out_dir / "data" / "swaps.json", {"generated": fmt_iso(now), "rows": swap_rows}, compact=True)
+    save_json(out_dir / "data" / "swaps.json", {"generated": fmt_iso(now), "snap_ts": sw.get("snap_ts"), "rows": swap_rows}, compact=True)
     return {"n_rows": len(rows), "n_swaps": len(swap_rows), "missing_total": missing_total, "stale_hours": stale_h}

@@ -3,7 +3,7 @@
    起動時に data/summary.json と data/swaps.json を、銘柄を選んだとき(とヒートマップの OI 上位分)に data/tickers/<T>.json を読む。
    パスはすべて相対(GitHub Pages のプロジェクトパス配下でも動く)。純粋関数は lib.js(window.VFM)。時刻はすべて UTC。 */
 const {HOUR, DAY, iso, parseTs, fmtTs, staleWarning, anomalyWarning, pct, cls, esc, big, CATEGORIES, categoryLabel, intervalLabel, shortTicker,
-       PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum} = VFM;
+       PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum, monthlyFromSummary} = VFM;
 const UP = "#34d399", DOWN = "#fb7185", CUM = "#93c5fd", GRID = "#1e293b";
 const STOP_DAYS = 2;            // 最終観測がこれより古い銘柄に「停止?」
 const HEAT_MAX = 60, HEAT_MONTHS = 18;
@@ -27,6 +27,7 @@ function save() { try { localStorage.setItem("vfm-state", JSON.stringify(state))
 
 // ───────── データ ─────────
 let SUMMARY = null, SWAPS = null, ROWS = [];
+let MONTHLY = null;   // data/monthly.json(月ごとの累積。無ければ銘柄別ファイルから計算)
 let END_MS = Date.now();        // 期間の終わり(summary.generated)
 let REF_MS = Date.now();        // 「停止?」の基準(summary.last_success)
 const BY_TICKER = new Map();
@@ -218,7 +219,8 @@ async function renderDetail() {
   const [start, end] = windowRange(state.preset, END_MS, first);
   const pays = d.payments.filter(p => p.t >= start && p.t <= end);
   if (!pays.length) { kp.innerHTML = `<div class="empty">${label}: この期間(${esc(presetLabel(state.preset))})のデータがありません。</div>`; showEmpty(ch, ""); return; }
-  const s = summarizePayments(pays, interval, start, end);
+  const firstPaid = d.payments.find(p => p.r != null);
+  const s = summarizePayments(pays, interval, start, end, firstPaid ? firstPaid.t : null);
   const card = (n, v, s2, c = "") => `<div class="kpi"><div class="n">${n}</div><div class="v big ${c}">${v}</div><div class="s">${s2}</div></div>`;
   const perYear = interval > 0 ? 365 * 86400 / interval : NaN;
   kp.innerHTML = [
@@ -264,16 +266,27 @@ async function renderHeat() {
   note.textContent = `絞り込み後の銘柄のうち OI 上位 ${list.length} 銘柄${all.length > list.length ? `(${all.length} 銘柄中。上限 ${HEAT_MAX})` : ""}。値は月ごとの累積 FR(%)、直近 ${HEAT_MONTHS} か月。欠測は加えない。`;
   if (!list.length) { showEmpty(el, "表示する銘柄がありません。"); return; }
   const req = ++heatReq;
-  if (!list.every(r => DETAIL.has(r.ticker))) { el.style.height = ""; showEmpty(el, "読み込み中…"); }
-  const res = await Promise.all(list.map(r => getDetail(r.ticker).then(d => d, () => null)));
-  if (req !== heatReq) return;
   const rows = [], pn = [], per = new Set(); let failed = 0;
-  list.forEach((r, i) => {
-    if (!res[i]) { failed++; return; }
-    const m = monthlyCum(res[i].payments); rows.push(r); pn.push(m);
-    for (const k of m.keys()) per.add(k);
-  });
-  if (failed) note.textContent += ` ${failed} 銘柄は詳細データ(data/tickers/)を読み込めなかったので省いた。`;
+  if (MONTHLY && MONTHLY.rows) {
+    // 月ごとの合計は build が data/monthly.json にまとめている(銘柄別ファイルを 60 個読まない)
+    for (const r of list) {
+      const m = monthlyFromSummary(MONTHLY.rows[r.ticker]);
+      if (!m.size) continue;
+      rows.push(r); pn.push(m);
+      for (const k of m.keys()) per.add(k);
+    }
+    if (!rows.length) { showEmpty(el, "まだ月ごとの累積がありません(最初の支払が記録されると出ます)。"); return; }
+  } else {
+    if (!list.every(r => DETAIL.has(r.ticker))) { el.style.height = ""; showEmpty(el, "読み込み中…"); }
+    const res = await Promise.all(list.map(r => getDetail(r.ticker).then(d => d, () => null)));
+    if (req !== heatReq) return;
+    list.forEach((r, i) => {
+      if (!res[i]) { failed++; return; }
+      const m = monthlyCum(res[i].payments); rows.push(r); pn.push(m);
+      for (const k of m.keys()) per.add(k);
+    });
+    if (failed) note.textContent += ` ${failed} 銘柄は詳細データ(data/tickers/)を読み込めなかったので省いた。`;
+  }
   if (!rows.length) { showEmpty(el, "詳細データを読み込めませんでした。", true); return; }
   const cols = [...per].sort((a, b) => a - b).slice(-HEAT_MONTHS);
   const z = pn.map(m => cols.map(k => m.has(k) ? m.get(k) : null));
@@ -303,12 +316,13 @@ const SWAP_COLS = [
 function normalizeSwaps(j) {
   /* 数値が文字列で来ても動くように揃える */
   const fix = o => o ? Object.fromEntries(Object.entries(o).map(([k, v]) => [k, num(v)])) : null;
-  return {generated: j.generated, rows: (j.rows || []).filter(r => r && typeof r.ticker === "string").map(r => ({...r,
+  const snap = j.snap_ts || ((j.rows || []).map(r => r && r.snap_ts).find(Boolean)) || null;
+  return {generated: j.generated, snap_ts: snap, rows: (j.rows || []).filter(r => r && typeof r.ticker === "string").map(r => ({...r,
     mark: num(r.mark), long_oi: num(r.long_oi), short_oi: num(r.short_oi), vol24: num(r.vol24), next_ts: num(r.next_ts), last: fix(r.last), next: fix(r.next)}))};
 }
 function renderSwap() {
   const rows = sortRows(SWAPS.rows, SWAP_COLS, state.swSort, state.swDesc);
-  $("swapBadges").innerHTML = [`取得 ${fmtTs(SWAPS.generated)} UTC`, `銘柄数 ${SWAPS.rows.length}`].map(b => `<span class="badge">${esc(b)}</span>`).join("");
+  $("swapBadges").innerHTML = [`取得 ${fmtTs(SWAPS.snap_ts || SWAPS.generated)} UTC`, `生成 ${fmtTs(SWAPS.generated)} UTC`, `銘柄数 ${SWAPS.rows.length}`].map(b => `<span class="badge">${esc(b)}</span>`).join("");
   $("swapCount").textContent = `${rows.length} 銘柄(現在値のみ)`;
   const tbl = $("swapTable");
   buildTable(tbl, SWAP_COLS, rows, state.swSort, state.swDesc, () => "");
@@ -332,10 +346,18 @@ window.addEventListener("hashchange", () => showTab(location.hash === "#swap" ? 
 async function main() {
   showTab(location.hash === "#swap" ? "swap" : "perp");
   if (!hasPlotly()) notice("al-plotly", "チャートのライブラリ(Plotly)を読み込めませんでした。表は表示できますがチャートは出ません。", "err");
-  const [sum, sw] = await Promise.allSettled([fetchJson("data/summary.json"), fetchJson("data/swaps.json")]);
+  const [sum, sw, mo] = await Promise.allSettled([fetchJson("data/summary.json"), fetchJson("data/swaps.json"), fetchJson("data/monthly.json")]);
+  if (mo.status === "fulfilled" && mo.value && mo.value.rows) MONTHLY = mo.value;
   if (sum.status === "fulfilled" && sum.value && Array.isArray(sum.value.rows)) {
     SUMMARY = sum.value;
     ROWS = SUMMARY.rows.filter(r => r && typeof r.ticker === "string");
+    // cum は [sum, apr, partial(0/1), start, days] の配列で来る(summary.json を小さくするため)。ここで展開する
+    for (const r of ROWS) {
+      if (r.cum) for (const k of Object.keys(r.cum)) {
+        const c = r.cum[k];
+        if (Array.isArray(c)) r.cum[k] = {sum: c[0], apr: c[1], partial: !!c[2], start: c[3], days: c[4]};
+      }
+    }
     for (const r of ROWS) BY_TICKER.set(r.ticker, r);
     const g = parseTs(SUMMARY.generated), ls = parseTs(SUMMARY.last_success);
     END_MS = Number.isFinite(g) ? g : Date.now();

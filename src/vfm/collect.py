@@ -65,8 +65,10 @@ def load_prev_changes(paths: DataPaths, prev_obs: dict[str, dict]) -> tuple[dict
 
 
 def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None, scheduled: _dt.datetime | None = None,
-             trigger: str = "manual", fetch=_fetch.fetch_stats, project_root: Path | None = None) -> dict:
-    """戻り値: 実行ログの行(dict)。失敗しても例外は投げず、行の http_status / note で分かる。"""
+             trigger: str = "manual", fetch=_fetch.fetch_stats, project_root: Path | None = None,
+             skip_if_fresh_seconds: int | None = None) -> dict:
+    """戻り値: 実行ログの行(dict)。失敗しても例外は投げず、行の http_status / note で分かる。
+    skip_if_fresh_seconds: 直前の成功がこの秒数以内なら何もしない(保険の schedule 用。戻り値は {"skipped": True, ...})。"""
     paths = DataPaths(data_root)
     paths.ensure()
     mode = settings.get("funding_mode")
@@ -75,6 +77,10 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     now = now or utc_now()
     scheduled = scheduled or now
     meta = load_json(paths.meta_path, None) or default_meta(now)
+    if skip_if_fresh_seconds is not None and meta.get("last_success_ts"):
+        age = (now - parse_iso(meta["last_success_ts"])).total_seconds()
+        if 0 <= age < skip_if_fresh_seconds:
+            return {"skipped": True, "last_success_ts": meta["last_success_ts"], "age_s": int(age), "trigger": trigger}
     meta["funding_mode"] = mode
     row = {k: "" for k in RUN_HEADER}
     row.update(scheduled_ts=fmt_iso(scheduled), trigger=trigger)
@@ -86,7 +92,8 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
         save_json(paths.meta_path, meta)
         append_csv(paths.run_file(now), RUN_HEADER, [row])
         return row
-    fetch_ts_dt = now
+    # 観測時刻は 429 の待ち時間の分だけ now より後(HTTP の往復 1 秒程度は無視)
+    fetch_ts_dt = now + _dt.timedelta(seconds=int(round(getattr(res, "waited_seconds", 0.0) or 0.0)))
     fetch_ts = fmt_iso(fetch_ts_dt)
     row.update(fetch_ts=fetch_ts, delay_s=int((fetch_ts_dt - scheduled).total_seconds()), http_status=res.status)
     try:
@@ -102,7 +109,8 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     prev_obs = load_last_obs(paths)
     prev_changes, prev_first = load_prev_changes(paths, prev_obs)
     last_pay = load_last_pay(paths)
-    result = process_run(stats.perps, fetch_ts, prev_obs, prev_changes, meta.get("last_success_ts"), last_pay, mode, prev_first)
+    result = process_run(stats.perps, fetch_ts, prev_obs, prev_changes, meta.get("last_success_ts"), last_pay, mode, prev_first,
+                         absent_prev=meta.get("absent") or [])
 
     # 観測ログ: 行ごとの obs_ts の日付のファイルへ(L 行は前回の取得時刻なので前日のことがある)
     by_day: dict[str, list[dict]] = {}
@@ -165,8 +173,9 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     cur = ab.get(day) or {}
     if not isinstance(cur, dict):
         cur = {"n": int(cur), "checked": 0}
-    ab[day] = {"n": int(cur.get("n", 0)) + len(result.anomalies), "checked": int(cur.get("checked", 0)) + result.n_checked}
+    ab[day] = {"n": int(cur.get("n", 0)) + result.n_contradictions, "checked": int(cur.get("checked", 0)) + result.n_checked}
     meta["anomalies_by_day"] = {k: v for k, v in sorted(ab.items())[-7:]}
+    meta["absent"] = result.absent   # 今回の取得に居なかった銘柄(次回、最後に見た時刻の判定に使う)
     meta["last_run_ts"] = fmt_iso(now)
     meta["last_success_ts"] = fetch_ts
     meta.setdefault("collection_start", fetch_ts)

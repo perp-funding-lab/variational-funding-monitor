@@ -138,8 +138,8 @@ def apr_7d(entries: list[dict]) -> tuple[float | None, int]:
 
 
 def fetch_7d(coins: list[str], now_ms: int, post: Callable[[dict], object] = hl_post,
-             sleep: Callable[[float], None] = time.sleep, deadline_s: float = 14 * 60) -> dict[str, dict]:
-    """銘柄ごとに直近 7 日の fundingHistory を取る。合計 deadline_s を超えたら残りは諦める(タイムアウト付き)。"""
+             sleep: Callable[[float], None] = time.sleep, deadline_s: float = 11 * 60) -> dict[str, dict]:
+    """銘柄ごとに直近 7 日の fundingHistory を取る。合計 deadline_s(既定 11 分。ジョブの 15 分に収める)を超えたら残りは諦める。"""
     out: dict[str, dict] = {}
     t0 = time.monotonic()
     for i, c in enumerate(sorted(set(coins))):

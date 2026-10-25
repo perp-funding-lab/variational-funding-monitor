@@ -62,7 +62,12 @@ test("summarizePayments: 欠測は件数のみ、年率は実日数、期間分�
   const s = L.summarizePayments(pays, 28800, start, end);
   assert.equal(s.count, 2); assert.equal(s.missing, 1); assert.equal(s.nEst, 1);
   assert.ok(Math.abs(s.total - 0.05) < 1e-9);
-  assert.ok(Math.abs(s.apr - 0.05 / 2 * 365) < 1e-9);          // 2 日分で年率換算
+  // 期間分のデータが無いときは、支払が覆う期間(最初の支払の窓の開始 〜 最後の支払 = 8h + 16h = 1 日)で年率換算(builder の cum_stat と同じ)
+  assert.ok(Math.abs(s.apr - 0.05 / 1 * 365) < 1e-9);
+  assert.ok(Math.abs(s.days - 1) < 1e-9);
+  // 期間分のデータがあるときは期間の長さで割る(first を期間開始より前に置く)
+  const s2 = L.summarizePayments(pays, 28800, start, end, start - 30 * L.DAY);
+  assert.ok(Math.abs(s2.apr - 0.05 / 7 * 365) < 1e-9); assert.equal(s2.partial, false);
   assert.equal(s.partial, true); assert.equal(s.start, first);
   assert.ok(Math.abs(s.maxApr - 0.1 * 1095) < 1e-9);          // 8h → ×1095
   assert.equal(s.neg_share, 50);
