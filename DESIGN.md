@@ -18,11 +18,12 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
 | パス | 1 行 | 分割 | 保持 |
 |---|---|---|---|
 | `data/runs/YYYY-MM.csv` | 実行ログ: `scheduled_ts,fetch_ts,delay_s,http_status,n_listings,n_perp,n_swap,n_obs_rows,n_funding_rows,n_anomalies,trigger,note` | 月 | 無期限 |
-| `data/obs/YYYY-MM-DD.csv` | 観測ログ: `obs_ts,ticker,interval_seconds,next_timestamp,interval_rate,annualized_rate,kind` (`kind` = `first` 窓で最初 / `change` 値が変わった / `last` 窓で最後) | 日 | 30 日(古いファイルは削除。git 履歴には残る) |
+| `data/obs/YYYY-MM-DD.csv` | 観測ログ: `obs_ts,ticker,interval_seconds,next_timestamp,interval_rate,annualized_rate,kind` (`kind` = `F` 窓で最初 / `C` 値が変わった / `L` 窓で最後) | 日 | 30 日(古いファイルは削除。git 履歴には残る) |
 | `data/funding/YYYY-MM.csv` | 確定 FR: `pay_ts,ticker,interval_seconds,interval_rate,annualized_rate,status,basis_obs_ts` (`status` = `confirmed` / `estimated` / `missing`。`missing` は rate 空欄) | 月(pay_ts 基準) | 無期限 |
 | `data/snapshots/YYYY-MM-DD.csv` | 毎時スナップショット: `snap_ts,ticker,contract_type,mark_price,long_oi,short_oi,volume_24h,base_spread_bps`(各 UTC 時の最初の成功回。価格は有効数字 7 桁、OI/出来高は整数ドル、スプレッドは小数 2 桁) | 日 | 無期限(月が終わると `data/archive/snapshots/YYYY-MM.csv.gz` に移す) |
 | `data/swaps_latest.json` | swap の最新値(全件) | - | 最新のみ |
-| `data/meta.json` | `collection_start`, `last_success_ts`, `last_run_ts`, `funding_mode`, `anomalies_by_day`(直近 7 日) | - | 最新のみ |
+| `data/meta.json` | `collection_start`, `last_success_ts`, `last_run_ts`, `funding_mode`, `anomalies_by_day`(直近 7 日。`{日: {n: 矛盾, checked: 検査}}`) | - | 最新のみ |
+| `data/names.json` | ticker → 名前(新規上場のときだけ変わる。取得に失敗した回の build 用) | - | 最新のみ |
 | `data/hl/hl_7d.json` | HL 7 日年率: `{fetched, coins: {"BTC": {"apr7d": 0.11, "n": 168, "dex": "main"}}}` | - | 最新のみ |
 | `config/settings.json` | `funding_mode` (`confirmed`/`estimated`)、判定の根拠、閾値 | - | 手で編集 |
 | `config/category_overrides.csv` | `ticker,category,reason` | - | 手で編集 |
@@ -41,7 +42,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
 - 欠測: 新しく記録する `pay_ts` と、その銘柄の直前の記録との間に `interval_seconds` の刻みで支払時刻があれば、その分を `missing`(rate 空欄)で埋める。0 にはしない。
 - 間隔の変更: 刻みは「新しい窓の interval_seconds」を T から逆算して使う。
 - 新規上場: 直前の記録が無い銘柄は欠測を作らない。上場廃止: 単に新しい行が増えない(ページでは最終観測が 2 日以上前の銘柄に印を付ける)。
-- 矛盾の計数(`n_anomalies`): confirmed モードで同じ窓の中で値が変わった件数 / estimated モードで窓の中で一度も値が変わらなかった(かつ金利成分でも 0 でもない)件数。1 日の合計が `anomaly_warn_per_day` を超えたらページに警告。
+- 矛盾の計数(`n_anomalies` / `n_checked`): estimated モードでは「0 でも金利成分でもない銘柄を 25 分以上観測できた窓」を検査(checked)とし、その中で一度も値が動かなかった窓を矛盾(n)とする。1 日の n / checked が `anomaly_warn_ratio`(0.5)を超えたら(checked ≥ 20 のとき)ページに警告。confirmed モードでは同じ窓の中で値が変わった件数を矛盾とし、1 日 `anomaly_warn_per_day`(20)件を超えたら警告。
 - `python -m vfm rebuild-funding --mode confirmed|estimated --out <path>` で観測ログからもう一方の方式の確定 FR を作り直せる。
 
 ## 3. 年率換算
@@ -63,7 +64,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
   "last_success": "2026-10-25T00:08:05Z",
   "collection_start": "2026-10-25T00:08:05Z",
   "funding_mode": "confirmed",
-  "anomalies_today": 0, "anomaly_warn": false, "anomaly_warn_per_day": 20,
+  "anomalies_today": 0, "anomalies_checked_today": 0, "anomaly_warn": false, "anomaly_warn_per_day": 20, "anomaly_warn_ratio": 0.5,
   "missing_total": 0,
   "stale_hours": 0.1,
   "hl_fetched": "2026-10-25T00:30:00Z",
@@ -72,7 +73,8 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
     {
       "ticker": "BTC-PERP", "name": "Bitcoin", "category": "crypto",
       "interval": 28800, "next_ts": 1792886400, "data_start": "2026-10-25",
-      "last_rate": 0.0001, "last_apr": 0.1095, "last_status": "confirmed", "last_pay_ts": 1792857600,
+      "cur_rate": 0.0001, "cur_apr": 0.1095,
+      "last_rate": 0.0001, "last_apr": 0.1095, "last_status": "estimated", "last_pay_ts": 1792857600,
       "apr7": null, "apr30": null,
       "cum": {"7": {"sum": 0.0003, "apr": 0.1095, "partial": true, "start": "2026-10-25", "days": 1.0},
               "30": {...}, "90": {...}, "180": {...}, "365": {...}, "all": {...}},
@@ -84,7 +86,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
   ]
 }
 ```
-- `rate`/`apr` は小数(0.0001 = 0.01%)。`diff_pp` は年率の差(Variational − HL)を %ポイントで。
+- `rate`/`apr` は小数(0.0001 = 0.01%)。`diff_pp` は 7 日年率の差(Variational − HL)を %ポイントで。`cur_rate`/`cur_apr` は API がいま表示している進行中の窓の値、`last_*` は最後に記録した支払(収集開始後の最初の支払まで null)。
 - `cum[k]` は `null` の場合がある(データなし)。`apr7`/`apr30` はデータ日数不足なら `null`。
 
 ### `tickers/<TICKER>.json`(行クリック時に読む)
