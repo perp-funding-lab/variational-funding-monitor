@@ -113,7 +113,8 @@
     const sum = r.reduce((a, b) => a + b, 0);
     const pos = r.filter(v => v > 0).reduce((a, b) => a + b, 0), neg = r.filter(v => v < 0).reduce((a, b) => a + b, 0);
     const first = pays.length ? pays[0].t : null;
-    const from = first != null ? Math.max(startMs, first) : startMs, days = (endMs - from) / DAY;
+    // 実日数は 1 支払間隔を下限にする(builder の cum_stat と同じ。支払 1 回だけの期間で年率が跳ねないように)
+    const from = first != null ? Math.max(startMs, first) : startMs, days = Math.max((endMs - from) / DAY, intervalSec > 0 ? intervalSec / 86400 : 0);
     const k = intervalSec > 0 ? 365 * 86400 / intervalSec : null;
     return {count: n, missing: pays.length - n, nEst: paid.filter(p => p.s === "e").length,
             total: sum * 100, pos: pos * 100, neg: neg * 100, neg_share: n ? r.filter(v => v < 0).length / n * 100 : NaN,
