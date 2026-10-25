@@ -9,7 +9,7 @@ import pytest
 from tests.conftest import RUN3, T0
 from vfm.build_site import _f, _r, build, cum_stat
 from vfm.store import FUNDING_HEADER, OBS_HEADER, SNAP_HEADER, append_csv, save_json
-from vfm.timeutil import INTEREST_APR, day_str, fmt_iso, from_unix, parse_iso
+from vfm.timeutil import INTEREST_APR, annualize, day_str, fmt_iso, from_unix, parse_iso, to_unix
 
 IV = 28800
 NOW = parse_iso(RUN3)                 # 2026-10-25T00:09:00Z
@@ -24,15 +24,15 @@ def payments_8h(n: int, last: int = T0, rate: float = 0.0001, status: str = "est
 # ---------------------------------------------------------------- cum_stat
 
 def test_cum_stat_is_partial_when_data_is_shorter_than_window():
-    pays = payments_8h(9)                    # 3 日弱
+    pays = payments_8h(9)                    # 9 回 = ちょうど 3 日分の支払
     s = cum_stat(pays, NOW_TS, 7, IV)
     first = T0 - 8 * IV
-    actual = (NOW_TS - first) / 86400
     assert s["partial"] is True
     assert s["n"] == 9
     assert s["sum"] == pytest.approx(9 * 0.0001)
-    assert s["apr"] == pytest.approx(9 * 0.0001 * 365 / actual)    # 実日数で年率換算
-    assert s["days"] == round(actual, 2)
+    # 窓を最初の支払に切り詰めたときは「支払が覆う期間」(最初の支払の窓の開始 〜 最後の支払)= 9 × 8h = 3 日で年率換算
+    assert s["days"] == 3.0
+    assert s["apr"] == pytest.approx(9 * 0.0001 * 365 / 3) == pytest.approx(annualize(0.0001, IV))
     assert s["start"] == day_str(from_unix(first)) == "2026-10-22"
 
 
@@ -74,12 +74,11 @@ def test_cum_stat_excludes_missing_and_never_counts_it_as_zero():
 def test_cum_stat_days_none_covers_everything():
     pays = payments_8h(30)
     s = cum_stat(pays, NOW_TS, None, IV)
-    first = pays[0][0]
-    actual = (NOW_TS - first) / 86400
     assert s["partial"] is False and s["n"] == 30
     assert s["sum"] == pytest.approx(30 * 0.0001)
-    assert s["apr"] == pytest.approx(30 * 0.0001 * 365 / actual)
-    assert s["days"] == round(actual, 2)
+    assert s["days"] == 10.0                                          # 30 × 8h の支払が覆う期間
+    assert s["apr"] == pytest.approx(30 * 0.0001 * 365 / 10) == pytest.approx(annualize(0.0001, IV))
+    assert s["start"] == day_str(from_unix(pays[0][0]))
 
 
 def test_cum_stat_returns_none_without_valid_payments():
@@ -183,7 +182,9 @@ def test_build_summary_rows_and_ticker_files(tmp_path):
 
     eth = by["ETH-PERP"]
     assert eth["apr7"] is None and eth["apr30"] is None                       # 7 日分揃っていない
-    assert eth["cum"]["7"]["partial"] is True and eth["cum"]["7"]["n"] == 3
+    assert eth["cum"]["7"][2] == 1 and eth["cum"]["7"][0] == pytest.approx(3 * 0.00006)   # [sum, apr, partial, start, days]
+    assert eth["cum"]["7"][3] == day_str(from_unix(T0 - 2 * IV)) and eth["cum"]["7"][4] == 1.0
+    assert eth["cum"]["7"][1] == pytest.approx(annualize(0.00006, IV), rel=1e-5)
     assert eth["n_pay"] == 3 and eth["n_missing"] == 1
     assert eth["last_status"] == "estimated" and eth["last_pay_ts"] == T0 and eth["last_rate"] == 0.00006
     assert eth["last_apr"] == pytest.approx(0.00006 * 1095)
@@ -197,8 +198,9 @@ def test_build_summary_rows_and_ticker_files(tmp_path):
     frm = NOW_TS - 7 * 86400
     n7 = sum(1 for k in range(30) if frm <= T0 - k * IV <= NOW_TS)
     assert btc["apr7"] == pytest.approx(n7 * 0.0001 * 365 / 7)
-    assert btc["apr30"] is None and btc["cum"]["30"]["partial"] is True
-    assert btc["cum"]["all"]["n"] == 30 and btc["cum"]["all"]["partial"] is False
+    assert btc["apr30"] is None and btc["cum"]["30"][2] == 1
+    assert btc["cum"]["all"][2] == 0 and btc["cum"]["all"][0] == pytest.approx(30 * 0.0001) and btc["cum"]["all"][4] == 10.0
+    assert btc["cum"]["7"][2] == 0 and btc["cum"]["7"][4] == 7.0 and len(btc["cum"]["7"]) == 5
     assert btc["n_pay"] == 30 and btc["n_missing"] == 0
     assert btc["mark"] == pytest.approx(80433.95, rel=1e-5) and btc["mark"] == 80433.9     # 行の float は有効数字 6 桁
     assert btc["data_start"] == "2026-10-15" and btc["category"] == "crypto"
@@ -224,7 +226,8 @@ def test_build_summary_rows_and_ticker_files(tmp_path):
     assert json.loads((tick / "COIN-PERP.json").read_text())["payments"] == []
 
     swaps = _read(out, "swaps.json")
-    assert swaps["generated"] == fmt_iso(NOW) and len(swaps["rows"]) == 1
+    assert swaps["generated"] == fmt_iso(NOW) and swaps["snap_ts"] == RUN3 and len(swaps["rows"]) == 1
+    assert all(r["listed"] is True for r in rows)
     sw = swaps["rows"][0]
     assert sw["ticker"] == "COPP-SWAP" and sw["name"] == "Swap on Copper Spot" and sw["mark"] == 6.566
     assert sw["long_oi"] == 922408.55 and sw["short_oi"] == 1157564.13 and sw["vol24"] == 0.0
@@ -368,3 +371,109 @@ def test_build_skips_tickers_unsafe_for_file_names(tmp_path):
     build(root, tmp_path / "site", now=NOW)
     s = _read(tmp_path / "site", "summary.json")
     assert "A/B-PERP" not in {r["ticker"] for r in s["rows"]} and s["n_tickers"] == 4
+
+
+# ---------------------------------------------------------------- cum_stat: 切り詰めた窓は「支払が覆う期間」で年率換算
+
+@pytest.mark.parametrize("n", [1, 2, 3, 9, 30])
+def test_cum_stat_partial_apr_equals_annualized_constant_rate(n):
+    pays = payments_8h(n, rate=0.0002)
+    for days in (7, 30, None):
+        s = cum_stat(pays, NOW_TS, days, IV)
+        if days is not None and n * IV >= days * 86400 + IV:
+            continue   # 窓が揃っている場合は別のテスト
+        assert s["n"] == n and s["days"] == round(n * IV / 86400, 2)
+        assert s["apr"] == pytest.approx(annualize(0.0002, IV)), (n, days)    # 支払 2 回で 2 倍に跳ねない
+        assert s["partial"] is (days is not None)
+
+
+def test_cum_stat_partial_gap_lowers_apr_over_the_covered_span():
+    pays = [(T0 - 2 * IV, 0.0003, "estimated"), (T0 - IV, None, "missing"), (T0, 0.0003, "estimated")]
+    s = cum_stat(pays, NOW_TS, 7, IV)
+    assert s["n"] == 2 and s["days"] == 1.0 and s["sum"] == pytest.approx(0.0006)
+    assert s["apr"] == pytest.approx(annualize(0.0003, IV) * 2 / 3)
+
+
+def test_cum_stat_non_clamped_window_still_uses_elapsed_time():
+    s = cum_stat(payments_8h(30), NOW_TS, 7, IV)
+    assert s["partial"] is False and s["days"] == 7.0
+    assert s["apr"] == pytest.approx(s["sum"] * 365 / 7)
+
+
+def test_cum_stat_clamped_span_ends_at_last_payment_before_now():
+    pays = payments_8h(3) + [(T0 + IV, 0.0001, "estimated")]          # 最後は未来の支払
+    s = cum_stat(pays, T0 + 100, 7, IV)
+    assert s["n"] == 3 and s["days"] == 1.0 and s["apr"] == pytest.approx(annualize(0.0001, IV))
+
+
+# ---------------------------------------------------------------- build(): 最新の取得に無い銘柄、monthly.json
+
+def test_build_keeps_unlisted_tickers_with_history_and_marks_listed_flag(tmp_path):
+    root = _project(tmp_path)
+    old_nt = T0 - 17 * IV
+    append_csv(root / "data" / "funding" / "2026-10.csv", FUNDING_HEADER,
+               [_fund_row(old_nt - 3 * IV + k * IV, "OLD-PERP", "0.0002") for k in range(3)]
+               + [_fund_row(T0 - 30 * IV, "GONE-PERP", "0.0003", iv=14400)])
+    append_csv(root / "data" / "obs" / "2026-10-19.csv", OBS_HEADER, [
+        {"obs_ts": "2026-10-19T08:08:00Z", "ticker": "OLD-PERP", "interval_seconds": IV, "next_timestamp": old_nt, "interval_rate": "0.0002", "annualized_rate": "0.219", "kind": "F"}])
+    out = tmp_path / "site"
+    res = build(root, out, now=NOW)
+    s = _read(out, "summary.json")
+    assert res["n_rows"] == s["n_tickers"] == 6
+    by = {r["ticker"]: r for r in s["rows"]}
+    assert {t for t, r in by.items() if r["listed"]} == {"BTC-PERP", "ETH-PERP", "COIN-PERP", "AGLD-PERP"}
+    old = by["OLD-PERP"]
+    assert old["listed"] is False and old["last_obs"] == "2026-10-19T08:08:00Z"
+    assert old["interval"] == IV and int(old["next_ts"]) == old_nt and old["n_pay"] == 3 and old["oi"] == 0.0
+    assert old["cur_rate"] == 0.0002 and old["name"] == "OLD-PERP" and old["category"] == "crypto"
+    assert old["last_pay_ts"] == old_nt - IV and old["mark"] is None
+    gone = by["GONE-PERP"]
+    assert gone["listed"] is False and gone["interval"] == 14400 and gone["next_ts"] is None and gone["cur_rate"] is None
+    assert gone["last_obs"] == day_str(from_unix(T0 - 30 * IV)) + "T00:00:00Z"
+    assert gone["n_pay"] == 1 and gone["last_rate"] == 0.0003
+    assert [r["ticker"] for r in s["rows"]][:4] == ["ETH-PERP", "BTC-PERP", "COIN-PERP", "AGLD-PERP"]    # OI 0 の銘柄は末尾
+    assert sorted(p.name for p in (out / "data" / "tickers").iterdir()) == sorted(f"{t}.json" for t in by)
+    assert json.loads((out / "data" / "tickers" / "GONE-PERP.json").read_text())["payments"] == [[T0 - 30 * IV, 0.0003, "e"]]
+
+
+def test_build_writes_monthly_sums_excluding_missing(tmp_path):
+    root = _project(tmp_path)
+    append_csv(root / "data" / "funding" / "2026-09.csv", FUNDING_HEADER, [
+        _fund_row(T0 - 91 * IV, "BTC-PERP", None, "missing"), _fund_row(T0 - 90 * IV, "BTC-PERP", "0.0005")])   # 2026-09-25
+    out = tmp_path / "site"
+    build(root, out, now=NOW)
+    m = _read(out, "monthly.json")
+    assert m["generated"] == fmt_iso(NOW)
+    assert m["months"] == ["2026-09", "2026-10"]
+    assert m["rows"]["BTC-PERP"] == {"2026-09": 0.0005, "2026-10": pytest.approx(30 * 0.0001)}
+    assert m["rows"]["ETH-PERP"] == {"2026-10": pytest.approx(3 * 0.00006)}                        # missing は入れない
+    assert "COIN-PERP" not in m["rows"] and "AGLD-PERP" not in m["rows"]
+    assert (out / "data" / "monthly.json").read_text(encoding="utf-8").count("\n") == 1
+
+
+def test_build_monthly_keeps_only_last_18_months(tmp_path):
+    root = _project(tmp_path)
+    rows = []
+    months = []
+    for i in range(24):
+        y, mth = divmod(2024 * 12 + 10 + i, 12)          # 2024-11 .. 2026-10
+        d = dt.datetime(y, mth + 1, 15, tzinfo=dt.timezone.utc)
+        months.append(d.strftime("%Y-%m"))
+        rows.append(_fund_row(int(d.timestamp()), "LONG-PERP", "0.001"))
+    append_csv(root / "data" / "funding" / "2026-10.csv", FUNDING_HEADER, rows)
+    build(root, tmp_path / "site", now=NOW)
+    m = _read(tmp_path / "site", "monthly.json")
+    assert m["months"] == months[-18:] and len(m["months"]) == 18 and m["months"][0] == "2025-05"
+    assert sorted(m["rows"]["LONG-PERP"]) == months[-18:]
+    assert all(v == 0.001 for v in m["rows"]["LONG-PERP"].values())
+    assert "2024-11" not in m["rows"]["LONG-PERP"]
+    by = {r["ticker"]: r for r in _read(tmp_path / "site", "summary.json")["rows"]}
+    assert by["LONG-PERP"]["listed"] is False and by["LONG-PERP"]["interval"] == IV
+
+
+def test_build_monthly_empty_without_funding(tmp_path):
+    root = _project(tmp_path)
+    (root / "data" / "funding" / "2026-10.csv").unlink()
+    build(root, tmp_path / "site", now=NOW)
+    m = _read(tmp_path / "site", "monthly.json")
+    assert m["months"] == [] and m["rows"] == {}

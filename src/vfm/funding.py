@@ -153,9 +153,10 @@ def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: d
                 r.n_checked += 1
             continue
         if nt < pnt:
-            # 時刻が戻った。窓を作り直すが FR は記録しない
+            # 時刻が戻った(API の一時的な不整合)。この回の値は記録せず、この銘柄は不在扱いにする
+            # (rebuild_from_obs も巻き戻った行を無視するので、本番と同じ結果になる)
             r.anomalies.append(f"{t}: next_timestamp went backwards {pnt}->{nt}")
-            r.obs_rows.append(_obs(fetch_ts, t, iv, nt, rate, ann, KIND_FIRST))
+            present.discard(t)
             continue
         # 窓が進んだ(pnt → nt)
         r.n_rollover += 1

@@ -54,14 +54,16 @@ def test_collect_command_passes_slot_scheduled_time_and_trigger(monkeypatch, tmp
     (tmp_path / "config" / "settings.json").write_text('{"funding_mode": "estimated"}')
     seen = {}
 
-    def fake_run_once(data_root, settings, *, now, scheduled, trigger, project_root):
-        seen.update(data_root=data_root, settings=settings, now=now, scheduled=scheduled, trigger=trigger, project_root=project_root)
+    def fake_run_once(data_root, settings, **kw):
+        seen.update(data_root=data_root, settings=settings, **kw)
         return {"http_status": 200, "note": ""}
 
     import vfm.collect
     monkeypatch.setattr(vfm.collect, "run_once", fake_run_once)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     rc = cli.main(["--root", str(tmp_path), "collect", "--slots", "8,18,28,38,48,58", "--trigger", "worker"])
     assert rc == 0
+    assert seen["skip_if_fresh_seconds"] is None                         # 指定しなければ無効
     assert seen["data_root"] == tmp_path.resolve() / "data" and seen["project_root"] == tmp_path.resolve()
     assert seen["settings"] == {"funding_mode": "estimated"} and seen["trigger"] == "worker"
     assert seen["scheduled"] <= seen["now"] and seen["scheduled"].minute in (8, 18, 28, 38, 48, 58)
@@ -156,3 +158,48 @@ def test_build_command_uses_root_site_by_default(monkeypatch, tmp_path, capsys):
     assert seen["out"] == tmp_path.resolve() / "site" and seen["root"] == tmp_path.resolve()
     assert cli.main(["--root", str(tmp_path), "build", "--out", str(tmp_path / "x")]) == 0
     assert seen["out"] == tmp_path / "x"
+
+
+def test_collect_command_skip_if_fresh_flag_and_github_output(monkeypatch, tmp_path, capsys):
+    seen = {}
+    returns = {"value": {"http_status": 200, "note": ""}}
+
+    def fake_run_once(data_root, settings, **kw):
+        seen.update(kw)
+        return returns["value"]
+
+    import vfm.collect
+    monkeypatch.setattr(vfm.collect, "run_once", fake_run_once)
+    gh = tmp_path / "gh_output.txt"
+    gh.write_text("existing=1\n", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(gh))
+    assert cli.main(["--root", str(tmp_path), "collect", "--skip-if-fresh", "720"]) == 0
+    assert seen["skip_if_fresh_seconds"] == 720
+    assert gh.read_text(encoding="utf-8") == "existing=1\nskipped=false\n"
+    # 飛ばした回: 終了コード 0、skipped=true
+    returns["value"] = {"skipped": True, "last_success_ts": "2026-10-25T00:01:30Z", "age_s": 300, "trigger": "schedule"}
+    assert cli.main(["--root", str(tmp_path), "collect", "--skip-if-fresh", "720", "--trigger", "schedule"]) == 0
+    assert gh.read_text(encoding="utf-8") == "existing=1\nskipped=false\nskipped=true\n"
+    assert json.loads(capsys.readouterr().out.splitlines()[-1]) == returns["value"]
+    # 0 は無効(None)
+    returns["value"] = {"http_status": 200, "note": ""}
+    assert cli.main(["--root", str(tmp_path), "collect", "--skip-if-fresh", "0"]) == 0
+    assert seen["skip_if_fresh_seconds"] is None
+    # 失敗した回も skipped=false を書いて 1 を返す
+    returns["value"] = {"http_status": 500, "note": "fetch failed: HTTP 500 (attempts 1)"}
+    assert cli.main(["--root", str(tmp_path), "collect"]) == 1
+    assert gh.read_text(encoding="utf-8").endswith("skipped=true\nskipped=false\nskipped=false\n")
+
+
+def test_collect_command_without_github_output_writes_no_file(monkeypatch, tmp_path):
+    import vfm.collect
+    monkeypatch.setattr(vfm.collect, "run_once", lambda *a, **k: {"http_status": 200, "note": ""})
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    before = sorted(p.name for p in tmp_path.iterdir())
+    assert cli.main(["--root", str(tmp_path), "collect"]) == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+
+
+def test_collect_command_rejects_non_integer_skip_if_fresh(tmp_path):
+    with pytest.raises(SystemExit):
+        cli.main(["--root", str(tmp_path), "collect", "--skip-if-fresh", "soon"])

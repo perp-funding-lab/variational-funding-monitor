@@ -6,7 +6,7 @@ import datetime as dt
 
 import pytest
 
-from tests.conftest import RUN1, RUN2, RUN3, T0, advance, body, load_doc, parse, set_rate
+from tests.conftest import RUN1, RUN2, RUN3, T0, advance, body, get_listing, load_doc, parse, set_interval, set_rate
 from vfm.collect import LATEST_CACHE, _dec2, _int_str, _sig, load_prev_changes, run_once
 from vfm.fetch import FetchError, FetchResult
 from vfm.store import OBS_HEADER, RUN_HEADER, DataPaths, append_csv, load_json, read_csv, save_json
@@ -301,3 +301,120 @@ def test_int_str_rounds_to_integer(v, expected):
 ])
 def test_dec2(v, expected):
     assert _dec2(v) == expected
+
+
+# ---------------------------------------------------------------- 429 の待ち時間、absent、skip_if_fresh、矛盾の計数
+
+def _tree(root):
+    return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def test_fetch_ts_is_shifted_by_rounded_wait_seconds(tmp_path):
+    data = tmp_path / "data"
+    t1 = parse_iso(RUN1)
+    row = run_once(data, SETTINGS, now=t1, scheduled=t1 - dt.timedelta(seconds=10), fetch=lambda: FetchResult(200, body(load_doc()), 3, 6.4), project_root=tmp_path)
+    assert row["fetch_ts"] == "2026-10-24T23:19:21Z" and row["delay_s"] == 16
+    assert {r["obs_ts"] for r in read_csv(data / "obs" / "2026-10-24.csv")} == {"2026-10-24T23:19:21Z"}
+    meta = load_json(data / "meta.json", None)
+    assert meta["last_success_ts"] == "2026-10-24T23:19:21Z" and meta["last_run_ts"] == RUN1
+    assert meta["collection_start"] == RUN1                      # 開始時刻は初回の now(待ち時間は足さない)
+    assert read_csv(data / "snapshots" / "2026-10-24.csv")[0]["snap_ts"] == "2026-10-24T23:19:21Z"
+    # 0.4 秒は丸めて 0
+    row2 = run_once(data, SETTINGS, now=parse_iso(RUN2), fetch=lambda: FetchResult(200, body(load_doc()), 1, 0.4), project_root=tmp_path)
+    assert row2["fetch_ts"] == RUN2
+
+
+def test_meta_absent_tracks_missing_tickers_and_basis_uses_real_last_observation(tmp_path):
+    data = tmp_path / "data"
+    doc = load_doc()
+    run_once(data, SETTINGS, now=parse_iso(RUN1), fetch=fake_fetch(body(doc)), project_root=tmp_path)
+    assert load_json(data / "meta.json", None)["absent"] == []
+    run_once(data, SETTINGS, now=parse_iso(RUN2), fetch=fake_fetch(body(doc)), project_root=tmp_path)          # 全員居る、変化なし
+    gone = copy.deepcopy(doc)
+    get_listing(gone, "ETH-PERP")["funding"] = None                                                             # ETH の funding が消えた
+    t3 = "2026-10-24T23:41:30Z"
+    row3 = run_once(data, SETTINGS, now=parse_iso(t3), fetch=fake_fetch(body(gone)), project_root=tmp_path)
+    assert load_json(data / "meta.json", None)["absent"] == ["ETH-PERP"]
+    assert row3["n_obs_rows"] == 1
+    obs = read_csv(data / "obs" / "2026-10-24.csv")
+    l_rows = [r for r in obs if r["kind"] == "L"]
+    assert [(r["ticker"], r["obs_ts"], r["interval_rate"]) for r in l_rows] == [("ETH-PERP", RUN2, "0.00006226")]   # 最後に見た取得の時刻
+    t4 = "2026-10-24T23:51:30Z"
+    row4 = run_once(data, SETTINGS, now=parse_iso(t4), fetch=fake_fetch(body(gone)), project_root=tmp_path)       # まだ居ない
+    assert row4["n_obs_rows"] == 0 and load_json(data / "meta.json", None)["absent"] == ["ETH-PERP"]
+    back = advance(copy.deepcopy(doc), 1)                                                                       # 戻ってきて窓も進んだ
+    row5 = run_once(data, SETTINGS, now=parse_iso(RUN3), fetch=fake_fetch(body(back)), project_root=tmp_path)
+    assert load_json(data / "meta.json", None)["absent"] == []
+    funding = {r["ticker"]: r for r in read_csv(data / "funding" / "2026-10.csv")}
+    assert funding["ETH-PERP"]["basis_obs_ts"] == RUN2 and funding["ETH-PERP"]["status"] == "estimated"      # 直前の取得 (23:51:30) ではない
+    assert funding["BTC-PERP"]["basis_obs_ts"] == t4
+    # 32 分動かなかった 0 でも金利成分でもない銘柄(ORDER/PUFFER/1000PEPE/1000FLOKI)は矛盾。戻ってきた ETH は 10 分しか見ていないので含めない
+    assert row5["n_anomalies"] == 4 and row5["note"].count("rate never moved") == 4 and "ETH-PERP" not in row5["note"]
+    assert load_json(data / "meta.json", None)["anomalies_by_day"]["2026-10-25"] == {"n": 4, "checked": 4}
+    eth_rows = [r for r in read_csv(data / "obs" / "2026-10-24.csv") if r["ticker"] == "ETH-PERP"]
+    assert [r["kind"] for r in eth_rows] == ["F", "L"]                                                         # 23:51:30 の偽 L 行は無い
+
+
+def test_skip_if_fresh_returns_without_touching_files(tmp_path):
+    data = tmp_path / "data"
+    t1 = parse_iso(RUN1)
+    run_once(data, SETTINGS, now=t1, fetch=fake_fetch(body(load_doc())), project_root=tmp_path)
+    before = _tree(tmp_path)
+    calls = []
+
+    def counting_fetch():
+        calls.append(1)
+        return FetchResult(200, body(load_doc()), 1, 0.0)
+
+    res = run_once(data, SETTINGS, now=t1 + dt.timedelta(minutes=5), trigger="schedule", fetch=counting_fetch, project_root=tmp_path, skip_if_fresh_seconds=720)
+    assert res == {"skipped": True, "last_success_ts": RUN1, "age_s": 300, "trigger": "schedule"}
+    assert calls == [] and _tree(tmp_path) == before
+    # 20 分前なら進む
+    res2 = run_once(data, SETTINGS, now=t1 + dt.timedelta(minutes=20), fetch=counting_fetch, project_root=tmp_path, skip_if_fresh_seconds=720)
+    assert "skipped" not in res2 and res2["http_status"] == 200 and calls == [1]
+    assert len(read_csv(data / "runs" / "2026-10.csv")) == 2
+    # 指定しなければ直後でも進む
+    res3 = run_once(data, SETTINGS, now=t1 + dt.timedelta(minutes=20, seconds=5), fetch=counting_fetch, project_root=tmp_path)
+    assert res3["http_status"] == 200 and calls == [1, 1]
+
+
+def test_skip_if_fresh_proceeds_without_meta_or_with_future_last_success(tmp_path):
+    calls = []
+
+    def counting_fetch():
+        calls.append(1)
+        return FetchResult(200, body(load_doc()), 1, 0.0)
+
+    res = run_once(tmp_path / "data", SETTINGS, now=parse_iso(RUN1), fetch=counting_fetch, project_root=tmp_path, skip_if_fresh_seconds=720)
+    assert res["http_status"] == 200 and calls == [1]
+    # last_success_ts が未来(時計ずれ)なら飛ばさない
+    res2 = run_once(tmp_path / "data", SETTINGS, now=parse_iso(RUN1) - dt.timedelta(minutes=1), fetch=counting_fetch, project_root=tmp_path, skip_if_fresh_seconds=720)
+    assert res2["http_status"] == 200 and calls == [1, 1]
+    # ちょうど閾値なら飛ばさない
+    res3 = run_once(tmp_path / "data", SETTINGS, now=parse_iso(RUN1) + dt.timedelta(seconds=720), fetch=counting_fetch, project_root=tmp_path, skip_if_fresh_seconds=720)
+    assert res3["http_status"] == 200
+
+
+def test_interval_change_inside_window_is_logged_but_not_a_contradiction(tmp_path):
+    data = tmp_path / "data"
+    doc = load_doc()
+    run_once(data, SETTINGS, now=parse_iso(RUN1), fetch=fake_fetch(body(doc)), project_root=tmp_path)
+    changed = set_interval(copy.deepcopy(doc), "XAG-PERP", 28800)
+    row = run_once(data, SETTINGS, now=parse_iso(RUN2), fetch=fake_fetch(body(changed)), project_root=tmp_path)
+    assert row["n_anomalies"] == 1 and row["note"] == f"anomalies: XAG-PERP: interval 14400->28800 inside window {T0}"
+    meta = load_json(data / "meta.json", None)
+    assert meta["anomalies_by_day"]["2026-10-24"] == {"n": 0, "checked": 0}
+    assert read_csv(data / "runs" / "2026-10.csv")[-1]["n_anomalies"] == "1"
+
+
+def test_ahead_of_clock_sample_is_logged_but_not_recorded(tmp_path):
+    data = tmp_path / "data"
+    doc = load_doc()
+    run_once(data, SETTINGS, now=parse_iso(RUN1), fetch=fake_fetch(body(doc)), project_root=tmp_path)
+    glitch = copy.deepcopy(doc)
+    get_listing(glitch, "SOL-PERP")["funding"]["next_timestamp"] = T0 + 2 * 86400     # (PAD は BTC の写しなので BTC は使わない)
+    row = run_once(data, SETTINGS, now=parse_iso(RUN2), fetch=fake_fetch(body(glitch)), project_root=tmp_path)
+    assert row["n_anomalies"] == 1 and "ahead of clock" in row["note"] and row["n_obs_rows"] == 0 and row["n_funding_rows"] == 0
+    meta = load_json(data / "meta.json", None)
+    assert meta["absent"] == ["SOL-PERP"] and meta["anomalies_by_day"]["2026-10-24"] == {"n": 0, "checked": 0}
+    assert not (data / "funding").exists() or list((data / "funding").iterdir()) == []

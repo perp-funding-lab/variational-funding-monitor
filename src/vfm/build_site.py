@@ -125,7 +125,8 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
     perps = list(latest.get("perps", []))
     for t in sorted((set(pays) | set(obs)) - listed):
         o = obs.get(t) or {}
-        perps.append({"ticker": t, "interval_seconds": o.get("interval_seconds") or intervals.get(t), "next_timestamp": o.get("next_timestamp"),
+        perps.append({"ticker": t, "interval_seconds": int(o.get("interval_seconds") or intervals.get(t) or 0) or None,
+                      "next_timestamp": int(o["next_timestamp"]) if o.get("next_timestamp") else None,
                       "interval_rate": o.get("interval_rate"), "annualized_rate": o.get("annualized_rate")})
     month_keys = sorted({_month_key(ts) for pl in pays.values() for ts, _, _ in pl})[-18:]
     monthly: dict[str, dict] = {}

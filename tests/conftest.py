@@ -110,6 +110,7 @@ class Simulator:
         self.prev_obs: dict[str, dict] = {}
         self.prev_fetch_ts: str | None = None
         self.last_pay: dict[str, int] = {}
+        self.absent: list[str] = []            # meta["absent"]: 直前の取得に居なかった銘柄
         self.obs_rows: list[dict] = []
         self.funding_rows: list[dict] = []
         self.results = []
@@ -130,7 +131,9 @@ class Simulator:
 
     def run(self, perps, fetch_ts: str):
         changes, first = self.prev_changes()
-        res = process_run(perps, fetch_ts, self.prev_obs, changes, self.prev_fetch_ts, self.last_pay, self.mode, first)
+        res = process_run(perps, fetch_ts, self.prev_obs, changes, self.prev_fetch_ts, self.last_pay, self.mode, first,
+                          absent_prev=self.absent)
+        self.absent = list(res.absent)
         for r in res.obs_rows:
             cur = self.prev_obs.get(r["ticker"])
             if cur is None or r["obs_ts"] > cur["obs_ts"]:
