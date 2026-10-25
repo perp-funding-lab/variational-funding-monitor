@@ -17,7 +17,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
 
 | パス | 1 行 | 分割 | 保持 |
 |---|---|---|---|
-| `data/runs/YYYY-MM.csv` | 実行ログ: `scheduled_ts,fetch_ts,delay_s,http_status,n_listings,n_perp,n_swap,n_obs_rows,n_funding_rows,n_anomalies,trigger,note` | 月 | 無期限 |
+| `data/runs/YYYY-MM.csv` | 実行ログ: `scheduled_ts,fetch_ts,delay_s,http_status,n_listings(= perp + swap),n_perp,n_swap,n_obs_rows,n_funding_rows,n_anomalies,trigger,note` | 月 | 無期限 |
 | `data/obs/YYYY-MM-DD.csv` | 観測ログ: `obs_ts,ticker,interval_seconds,next_timestamp,interval_rate,annualized_rate,kind` (`kind` = `F` 窓で最初 / `C` 値が変わった / `L` 窓で最後) | 日 | 30 日(古いファイルは削除。git 履歴には残る) |
 | `data/funding/YYYY-MM.csv` | 確定 FR: `pay_ts,ticker,interval_seconds,interval_rate,annualized_rate,status,basis_obs_ts` (`status` = `confirmed` / `estimated` / `missing`。`missing` は rate 空欄) | 月(pay_ts 基準) | 無期限 |
 | `data/snapshots/YYYY-MM-DD.csv` | 毎時スナップショット: `snap_ts,ticker,contract_type,mark_price,long_oi,short_oi,volume_24h,base_spread_bps`(各 UTC 時の最初の成功回。価格は有効数字 7 桁、OI/出来高は整数ドル、スプレッドは小数 2 桁) | 日 | 無期限(月が終わると `data/archive/snapshots/YYYY-MM.csv.gz` に移す) |
@@ -86,7 +86,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
   ]
 }
 ```
-- `rate`/`apr` は小数(0.0001 = 0.01%)。`diff_pp` は 7 日年率の差(Variational − HL)を %ポイントで。`cur_rate`/`cur_apr` は API がいま表示している進行中の窓の値、`last_*` は最後に記録した支払(収集開始後の最初の支払まで null)。
+- 数値はすべて有効数字 6 桁に丸める(OI や出来高のドル額も。ファイルサイズのため)。`rate`/`apr` は小数(0.0001 = 0.01%)。`diff_pp` は 7 日年率の差(Variational − HL)を %ポイントで。`cur_rate`/`cur_apr` は API がいま表示している進行中の窓の値、`last_*` は最後に記録した支払(収集開始後の最初の支払まで null)。
 - `cum[k]` は `null` の場合がある(データなし)。`apr7`/`apr30` はデータ日数不足なら `null`。
 
 ### `tickers/<TICKER>.json`(行クリック時に読む)

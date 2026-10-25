@@ -80,14 +80,13 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     row.update(scheduled_ts=fmt_iso(scheduled), trigger=trigger)
     try:
         res = fetch()
-        fetch_ts_dt = utc_now() if now is None else now
     except _fetch.FetchError as e:
-        row.update(fetch_ts=fmt_iso(utc_now()), http_status=e.status or "", note=f"fetch failed: {e} (attempts {e.attempts})")
+        row.update(fetch_ts=fmt_iso(now), http_status=e.status or "", note=f"fetch failed: {e} (attempts {e.attempts})")
         meta["last_run_ts"] = fmt_iso(now)
         save_json(paths.meta_path, meta)
         append_csv(paths.run_file(now), RUN_HEADER, [row])
         return row
-    fetch_ts_dt = now if now is not None else utc_now()
+    fetch_ts_dt = now
     fetch_ts = fmt_iso(fetch_ts_dt)
     row.update(fetch_ts=fetch_ts, delay_s=int((fetch_ts_dt - scheduled).total_seconds()), http_status=res.status)
     try:

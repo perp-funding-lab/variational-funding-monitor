@@ -11,6 +11,10 @@ class SchemaError(Exception):
     pass
 
 
+# 全銘柄が 1 回で返る想定(2026-10 時点で 582)。これより少なければ形が変わったとみなして記録しない
+MIN_LISTINGS = 50
+
+
 @dataclass
 class Perp:
     ticker: str
@@ -84,7 +88,7 @@ def parse_stats(body: bytes | str) -> Stats:
     if not isinstance(d, dict) or not isinstance(d.get("listings"), list):
         raise SchemaError("listings missing")
     listings = d["listings"]
-    if len(listings) < 50:   # 全銘柄が 1 回で返る想定(2026-10 時点で 582)。極端に少なければ異常
+    if len(listings) < MIN_LISTINGS:
         raise SchemaError(f"too few listings: {len(listings)}")
     perps: list[Perp] = []
     swaps: list[Swap] = []
