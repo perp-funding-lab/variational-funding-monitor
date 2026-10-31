@@ -1,26 +1,30 @@
 # Variational Funding Rate Monitor
 
-Variational Omni の無期限(perp)全銘柄のファンディングレート(FR)を 10 分ごとに自前で記録し続け、
-銘柄別の一覧・チャート・Hyperliquid との比較を静的ページとして公開する。Variational の API には履歴が無いので、
-データは収集開始時点(2026-10-24 23:19 UTC)から貯まる。
+Variational Omni の無期限(perp)全銘柄のファンディングレート(FR)を 10 分ごとに記録し続け、銘柄別の一覧・チャート・
+Hyperliquid との比較を静的ページとして公開する。**このページは Variational の公式ページではない**。
+データは Variational の公開 API から取得したもので、API に履歴が無いため収集開始(2026-10-24 23:19:15 UTC)から貯まる。
 
-- 公開ページ: https://__ORG__.github.io/variational-funding-monitor/
-- データ元: `GET https://omni-client-api.prod.ap-northeast-1.variational.io/metadata/v2/stats`(キー不要、全銘柄が 1 回で返る)
+- 公開ページ: https://perp-funding-lab.github.io/variational-funding-monitor/
+- データ元: `GET https://omni-client-api.prod.ap-northeast-1.variational.io/metadata/v2/stats`(キー不要、全銘柄が 1 回で返る)。
+  HL の列は Hyperliquid の公開 API(`fundingHistory`)
 - 仕様: [API](https://docs.variational.io/technical-documentation/api) / [Funding Rates](https://docs.variational.io/omni/trading/funding-rates)
 
 ## 構成
 
 ```
-Cloudflare Worker (cron 8,18,28,38,48,58 分) ─workflow_dispatch→ GitHub Actions collect.yml
-GitHub Actions schedule(保険: 13,43 分)        ────────────────→   同上
-  collect.yml : python -m vfm collect → data/ を更新 → commit/push(競合時は rebase して再試行)
-                python -m vfm build   → site/data/*.json を生成(コミットしない)→ GitHub Pages にデプロイ
-  hl.yml      : 1 日 1 回(00:40 UTC)Hyperliquid の 7 日年率と対応表を更新
-  archive.yml : 月初に先月の日次スナップショットを .csv.gz にまとめる
+Cloudflare Worker perp-funding-lab-dispatch(cron 8,18,28,38,48,58 分)
+   └─ GitHub App perp-funding-lab-collector の installation token(このリポ限定・actions: write、毎回発行)で workflow_dispatch
+GitHub Actions の schedule(保険: 13,43 分。直前 12 分以内に成功していれば何もしない)
+   └─ collect.yml : python -m vfm collect → data/ を更新 → commit/push(競合時は rebase して再試行)
+                    python -m vfm build   → site/data/*.json を生成(コミットしない)→ GitHub Pages にデプロイ
+      hl.yml      : 1 日 1 回(00:40 UTC)Hyperliquid の 7 日年率と対応表を更新
+      archive.yml : 月初に先月の日次スナップショットを .csv.gz にまとめる
 ```
 
 - 収集・集計は Python(標準ライブラリのみ)、ページは素の JS(Plotly は CDN)。外部サービスは Variational・Hyperliquid・GitHub・Cloudflare のみ。
-- データを書く 3 つのワークフローは同じ concurrency group で直列に動く。push が競合したら `git rebase` して最大 4 回やり直す。
+- 認証は Organization 所有の GitHub App。個人の PAT は使わない。Actions の一覧には起動者として `perp-funding-lab-collector[bot]` が出る。
+  コミットの作者・コミッターも App の bot(`perp-funding-lab-collector[bot]` と bot の noreply アドレス)に揃えている。
+- collect.yml は同時に 1 つだけ動く(concurrency group `collect`)。hl.yml / archive.yml は別のグループ(触るファイルが重ならず、push が競合しても rebase で解ける)。
 - 収集は毎回 stats を 1 回取得する(タイムアウト 20 秒、429 は `retry_after_seconds` を待って最大 3 回再試行)。形が想定と違えば何も記録しない。
 - 取得に失敗してもサイトは作り直す(最終取得から 2 時間を超えるとページ上部に警告)。
 
@@ -54,6 +58,12 @@ Variational の `funding.last` が「直前に確定した値(窓の中で動か
 
 - 窓 T(`next_timestamp = T`)が閉じた(`next_timestamp` が進んだ)とき、T の直前に取れた最後の値を **時刻 T の FR(推定)** として記録する。
   58 分の起動がこのためにある(支払直前の最終観測)。ページでは「推定」と分かるようにしている。
+- 「直前」の条件: 最後の観測が支払時刻の 30 分前以降(または支払後の凍結中)であること。それより古い観測しか無い窓は推定せず **欠測** にする
+  (収集が止まっていた窓に、何時間も前の値を推定値として入れない)。Worker が動いていれば 2 分前、保険の schedule だけでも 17 分前に観測がある。
+- 支払間隔が窓の途中で変わったとき(Bybit に合わせた 8h→4h など。next_timestamp は正当に前へ動く)は、巻き戻りではなく間隔の変更として扱う:
+  旧窓は支払われずに打ち切り(FR も欠測も作らない)、新しい窓をその時点から追う。窓の境目で変わった場合は旧窓を通常どおり記録する。
+  間隔が同じまま next_timestamp が戻った・支払時刻より前に動いた値は API の一時的な不整合として記録せず、その回はその銘柄を不在扱いにする。
+- 取得に居なかった(funding が null・一覧から消えた・不整合だった)回しか無い窓は 0 ではなく欠測になる。
 - もう一方の方式(確定値型: 窓で最初に取れた値を T − interval の確定値とする)も実装・テスト済みで、
   `python -m vfm rebuild-funding --mode confirmed --out /tmp/confirmed.csv` で観測ログ(30 日分)から作り直せる。
 - 本番でも毎回、判定と矛盾する動きを数える。見込み値型なら「0 でも金利成分でもない銘柄を 25 分以上観測できた窓」を検査とし、
@@ -97,6 +107,10 @@ Variational の `funding.last` が「直前に確定した値(窓の中で動か
 - 初回の読み込みは合計 2 MB 以内(Plotly の cartesian バンドルを含む)。銘柄別の詳細は行クリック時に `data/tickers/<TICKER>.json` を読む
 
 年率換算 = 1 回分の FR × (365 日 ÷ 支払間隔)。4 時間なら ×2190、8 時間なら ×1095、1 時間なら ×8760(API の `annualized_rate` と一致)。
+期間の年率 = 期間の累積 FR ÷ 観測できた日数 × 365。観測できた日数 = 期間内の(欠測でない)支払いの間隔の合計で、欠測の窓は累積にも日数にも入れない
+(0 として薄めない。欠測が無ければ期間の長さと同じ)。期間内に欠測があれば ※ を付け、説明に欠測の数を出す。
+ページの JS の計算(期間の累積・年率・※、日/週/月のまとめ、月ごとの累積)は Python(`src/vfm/aggregate.py`)と同じ定義で、
+同じ入力で結果が一致することを `tests/fixtures/cross_lang.json` で確かめている。
 金利成分は 0.00125 % / 時(8 時間で 0.01 %、年 10.95 %)で、プレミアムが無い銘柄の FR はこの値ちょうどになる。
 index 価格が公開されていないのでプレミアムは出せない。OI はトレーダー側のみ(片側)。
 
@@ -131,34 +145,49 @@ SSL_CERT_FILE=/etc/ssl/cert.pem PYTHONPATH=src python3 -m vfm hl-update
 PYTHONPATH=src python3 -m vfm rebuild-funding --mode confirmed --out /tmp/confirmed.csv
 PYTHONPATH=src python3 -m vfm status
 python3 -m pytest -q && node --test tests/js/*.test.js   # テスト
-bash scripts/check_identifiers.sh <Organization> <リポ名> <Worker 名>   # 本人名が無いことの確認
-python3 scripts/estimate_repo_size.py --runs 288        # リポサイズの見積もり
-
-# Worker(cloudflare-worker/)
-cd cloudflare-worker && npx wrangler@4 deploy
-bash ../scripts/set_worker_secret.sh --dispatch          # PAT を貼り付けて secret put → deploy
-npx wrangler@4 tail                                      # ログ
-
-# 起動の確認
-gh run list --workflow collect.yml --limit 10            # workflow_dispatch(Worker)と schedule(保険)の両方が見えること
+python3 tests/fixtures/make_cross_lang.py               # JS と Python の一致テストの答えを作り直す(集計の定義を変えたとき)
+bash scripts/check_identifiers.sh                       # 本人名が無いこと(git の全履歴・コード・識別子)
+python3 scripts/check_public_api.py --extra <本人のアカウント名>   # 認証なしの公開 API に本人名が無いこと
+python3 scripts/estimate_repo_size.py --runs 150        # リポサイズの見積もり
 ```
 
-### PAT(fine-grained)
+### GitHub App(perp-funding-lab-collector)
 
-リソース所有者は Organization、対象はこのリポのみ、権限は Actions: Read and write、期限 1 年。Worker の secret `GITHUB_TOKEN` に入れる。
-期限が切れると Worker からの起動だけが止まり、Actions の保険 schedule(30 分ごと)だけで動く(`gh run list` で `workflow_dispatch` 起点が消えたら再発行)。
-Worker は dispatch 応答のヘッダ `github-authentication-token-expiration` から残り日数をログに出す(残り 14 日以内で警告ログ)。
+Organization 所有の private な App(この Organization にだけインストールできる)。権限は administration・contents・actions・workflows・pages が write、
+metadata が read。Webhook は無効。App ID・installation ID・bot の ID は `config/github_app.json`(秘密ではない)。
 
-### Cloudflare の cron 数
+- 秘密鍵は作成時に manifest flow の変換 API から受け取り、macOS の Keychain(サービス `perp-funding-lab-collector`)にだけ置いた。ダウンロードしていない。
+- ローカルの操作はすべて `scripts/gh_app.py` が App のトークン(installation token、1 時間で失効)で行う。トークンは URL・ログ・ファイルに残さない
+  (git push は環境変数経由の credential helper で渡し、既存の helper は外す)。
 
-Workers Free はアカウント全体で cron 5 本まで。上限に達していると deploy 時に登録だけ黙って拒否されるので、
-deploy 後に `wrangler` または API(`/accounts/{id}/workers/scripts/{name}/schedules`)で登録を確認する。拒否されていたら Worker を消し、`collect.yml` の schedule を 10 分間隔(`8,18,28,38,48,58 * * * *`)にして主系にする。
+```bash
+python3 scripts/gh_app.py check --repo                  # トークン発行の確認(期限と権限だけ表示)
+python3 scripts/gh_app.py dispatch collect.yml          # 収集を手動で 1 回(起動者は App の bot)
+python3 scripts/gh_app.py dispatch hl.yml
+python3 scripts/gh_app.py runs --limit 20               # 実行一覧(起動者つき)
+python3 scripts/gh_app.py push -- origin main           # App のトークンで push
+```
+
+### Worker(perp-funding-lab-dispatch)
+
+```bash
+cd cloudflare-worker && npx wrangler@4 deploy
+python3 ../scripts/gh_app.py pkcs8 | npx wrangler@4 secret put GITHUB_APP_PRIVATE_KEY   # 鍵を PKCS#8 にして標準入力で渡す(画面に出さない)
+npx wrangler@4 deploy                                    # secret put の後は必ず deploy し直す
+npx wrangler@4 tail                                      # ログ
+```
+
+dispatch のたびに App の JWT を作り、このリポ限定・actions: write だけの installation token を発行して使う(PAT と違って期限切れが無い)。
+`workers_dev = false`(公開 URL を作らない。workers.dev のサブドメインはアカウント名を含むので出さない)。
+Workers のアカウント全体の cron 数には上限がある。deploy 後に API(`/accounts/{id}/workers/scripts/{name}/schedules`)で登録を確かめ、
+拒否されていたら Worker を消して collect.yml の schedule を 10 分間隔(`8,18,28,38,48,58 * * * *`、`--skip-if-fresh` なし)の主系にする。
 
 ## 既知の制約
 
-- 収集開始(2026-10-24 23:19 UTC)より前のデータは無い。7 日 / 30 日の列は日数が揃うまで「—」。
+- 収集開始(2026-10-24 23:19:15 UTC)より前のデータは無い。7 日 / 30 日の列は日数が揃うまで「—」。
+- 2026-10-25 01:25:47 UTC 〜 2026-10-31 のローカル収集の再開までは収集していない(手元での収集を止めていた)。この間の窓はすべて欠測。
 - OI はトレーダー側のみ(Variational の仕様)。index 価格が無いのでプレミアムは出せない。
-- 確定 FR は見込み値型の「窓の直前の最後の観測値」= 推定(支払時刻ちょうどの値ではない。最大で約 2 分前、保険 schedule だけで動いているときは最大約 17 分前)。
+- 確定 FR は見込み値型の「窓の直前の最後の観測値」= 推定(支払時刻ちょうどの値ではない。支払時刻の 30 分以内に観測が無ければ欠測)。
 - GitHub Actions の起動は予定より遅れる(実行ログの `delay_s`)。
 - swap は現在値のみ(履歴は持たない)。
 

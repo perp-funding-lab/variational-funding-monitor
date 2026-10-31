@@ -143,9 +143,20 @@ def test_estimated_observation_exactly_at_window_start_counts_as_missing():
     prev = obs_row("2026-10-24T16:00:00Z", "ETH-PERP", IV8, T0, "0.00006")
     r = process_run([perp("ETH-PERP", IV8, T0 + IV8, "0.00005")], RUN3, {"ETH-PERP": prev}, {}, None, {}, ST_ESTIMATED)
     assert r.funding_rows[0]["status"] == ST_MISSING
+    # 窓の中でも、支払時刻の 30 分より前の観測しか無ければ推定しない(窓の終わりの値ではないので欠測)
     prev2 = obs_row("2026-10-24T16:00:01Z", "ETH-PERP", IV8, T0, "0.00006")
     r2 = process_run([perp("ETH-PERP", IV8, T0 + IV8, "0.00005")], RUN3, {"ETH-PERP": prev2}, {}, None, {}, ST_ESTIMATED)
-    assert r2.funding_rows[0]["status"] == ST_ESTIMATED and r2.funding_rows[0]["basis_obs_ts"] == "2026-10-24T16:00:01Z"
+    assert r2.funding_rows[0]["status"] == ST_MISSING and r2.funding_rows[0]["interval_rate"] is None
+
+
+def test_estimated_freshness_boundary_is_thirty_minutes_before_payment():
+    for ts, status in (("2026-10-24T23:29:59Z", ST_MISSING), ("2026-10-24T23:30:00Z", ST_ESTIMATED),
+                       ("2026-10-24T23:58:00Z", ST_ESTIMATED), ("2026-10-25T00:01:30Z", ST_ESTIMATED)):   # 支払後の凍結中も可
+        prev = obs_row(ts, "ETH-PERP", IV8, T0, "0.00006")
+        r = process_run([perp("ETH-PERP", IV8, T0 + IV8, "0.00005")], "2026-10-25T00:08:00Z", {"ETH-PERP": prev}, {}, None, {}, ST_ESTIMATED)
+        assert r.funding_rows[0]["status"] == status, ts
+        if status == ST_ESTIMATED:
+            assert r.funding_rows[0]["basis_obs_ts"] == ts and r.funding_rows[0]["interval_rate"] == "0.00006"
 
 
 def test_estimated_does_not_rewrite_pay_ts_already_recorded():
@@ -307,7 +318,7 @@ def test_next_timestamp_going_backwards_restarts_window_without_funding():
         assert r.obs_rows == []
         assert r.absent == ["BTC-PERP"]
         assert r.funding_rows == [] and r.n_rollover == 0
-        assert r.anomalies == [f"BTC-PERP: next_timestamp went backwards {T0 + IV8}->{T0}"]
+        assert r.anomalies == [f"BTC-PERP: next_timestamp moved {T0 + IV8}->{T0} before the payment time (ignored)"]
         assert r.n_contradictions == 0
 
 
@@ -510,16 +521,35 @@ def test_returning_absent_ticker_estimated_uses_real_last_observation_not_global
     assert back.absent == [] and back.n_rollover == 1
     assert kinds(back.obs_rows) == [KIND_FIRST]                   # 07:58 の偽の L 行は作らない
     assert back.obs_rows[0]["obs_ts"] == "2026-10-25T08:08:00Z"
+    # 最後に見たのは 20:18(支払 00:00 の 3 時間以上前)なので推定せず欠測。偽の 07:58 を根拠にした「推定」も作らない
     assert [(r["pay_ts"], r["status"], r["interval_rate"], r["basis_obs_ts"], r["interval_seconds"]) for r in back.funding_rows] == \
-        [(T0, ST_ESTIMATED, "0.00012", "2026-10-24T20:18:00Z", IV4), (T0 + IV4, ST_MISSING, None, None, IV4)]
+        [(T0, ST_MISSING, None, None, IV4), (T0 + IV4, ST_MISSING, None, None, IV4)]
     assert back.anomalies == [] and back.n_checked == 0 and back.n_contradictions == 0      # 20:08→20:18 の 10 分では検査しない
+    assert {_key(r) for r in rebuild_from_obs(sim.obs_rows, ST_ESTIMATED)} == {_key(r) for r in sim.funding_rows}
+
+
+def test_returning_absent_ticker_seen_just_before_payment_uses_that_observation_as_basis():
+    # 23:48 と 23:58 に居て、00:08 から居なくなり、翌朝 08:08 に戻る。根拠は本当に最後に見た 23:58(偽の 07:58 ではない)
+    sim = Simulator(ST_ESTIMATED)
+    x = perp("X-PERP", IV4, T0, "0.00012")
+    sim.run([x], "2026-10-24T23:48:00Z")
+    sim.run([x], "2026-10-24T23:58:00Z")
+    gone = sim.run([], "2026-10-25T00:08:00Z")
+    assert [(r["kind"], r["obs_ts"]) for r in gone.obs_rows] == [(KIND_LAST, "2026-10-24T23:58:00Z")]
+    for ts in ("2026-10-25T03:58:00Z", "2026-10-25T07:58:00Z"):
+        assert sim.run([], ts).obs_rows == []
+    back = sim.run([perp("X-PERP", IV4, T0 + 2 * IV4, "0.00013")], "2026-10-25T08:08:00Z")
+    assert kinds(back.obs_rows) == [KIND_FIRST]
+    assert [(r["pay_ts"], r["status"], r["interval_rate"], r["basis_obs_ts"]) for r in back.funding_rows] == \
+        [(T0, ST_ESTIMATED, "0.00012", "2026-10-24T23:58:00Z"), (T0 + IV4, ST_MISSING, None, None)]
     assert {_key(r) for r in rebuild_from_obs(sim.obs_rows, ST_ESTIMATED)} == {_key(r) for r in sim.funding_rows}
 
 
 def test_returning_absent_ticker_never_seen_twice_uses_first_row_as_basis():
     sim, gone, back = _absent_sequence(ST_ESTIMATED, seen_again=False)
     assert gone.obs_rows == []                                    # F 行の直後に消えた: prev_fetch_ts == obs_ts なので L 行なし
-    assert back.funding_rows[0]["status"] == ST_ESTIMATED and back.funding_rows[0]["basis_obs_ts"] == "2026-10-24T20:08:00Z"
+    # 唯一の観測 20:08 は支払 00:00 の 30 分より前なので欠測(0 にはしない)
+    assert back.funding_rows[0]["status"] == ST_MISSING and back.funding_rows[0]["interval_rate"] is None
     assert back.anomalies == [] and back.n_checked == 0
 
 
@@ -617,7 +647,8 @@ def test_interval_shortening_across_rollover_confirmed_has_no_spurious_missing()
     sim.run([perp("X-PERP", IV8, T0, "0.0001")], RUN1)                                       # confirmed T0 − 8h
     sim.run([perp("X-PERP", IV8, T0, "0.0001")], RUN2)
     r = sim.run([perp("X-PERP", IV4, T0 + IV4, "0.00005")], RUN3)                            # 8h → 4h
-    assert [(x["pay_ts"], x["status"], x["interval_seconds"], x["interval_rate"]) for x in r.funding_rows] == [(T0, ST_CONFIRMED, IV4, "0.00005")]
+    # 旧窓(8h)の支払時刻 T0 の確定値なので 8h で記録する(4h にすると年率が 2 倍になる)
+    assert [(x["pay_ts"], x["status"], x["interval_seconds"], x["interval_rate"]) for x in r.funding_rows] == [(T0, ST_CONFIRMED, IV8, "0.00005")]
     assert [(x["pay_ts"], x["status"]) for x in sim.funding_rows] == [(T0 - IV8, ST_CONFIRMED), (T0, ST_CONFIRMED)]
     assert {_key(x) for x in rebuild_from_obs(sim.obs_rows, ST_CONFIRMED)} == {_key(x) for x in sim.funding_rows}
 
@@ -658,7 +689,7 @@ def _backwards_glitch_sequence(mode):
     glitch = sim.run([perp("X-PERP", IV8, T0 - IV8, "0.0009")], RUN2)                  # 戻った
     assert glitch.funding_rows == [] and KIND_FIRST not in kinds(glitch.obs_rows) and glitch.n_contradictions == 0
     assert sim.ticker in glitch.absent if hasattr(sim, "ticker") else True
-    assert any("went backwards" in a for a in glitch.anomalies)
+    assert any("before the payment time" in a for a in glitch.anomalies)
     sim.run([perp("X-PERP", IV8, T0, "0.0004")], "2026-10-24T23:41:30Z")              # 元に戻る
     sim.run([perp("X-PERP", IV8, T0 + IV8, "0.0005")], RUN3)
     return sim
@@ -680,3 +711,26 @@ def test_rebuild_matches_live_after_single_backwards_glitch(mode):
     full = lambda r: (int(r["pay_ts"]), r["ticker"], r["status"], r["interval_rate"], int(r["interval_seconds"]), r["basis_obs_ts"])
     assert {full(r) for r in rebuilt} == {full(r) for r in live}
     assert len(rebuilt) == len(live)
+
+
+
+# ---------------------------------------------------------------- 窓の中で next_timestamp を変えずに間隔だけ変わる場合(直した不具合の再発防止)
+
+_SAME_WINDOW_INTERVAL_BUG = ("src bug: an interval change that keeps next_timestamp (e.g. 4h->1h in the last hour of the window) is applied "
+                             "to the whole window: the next rollover writes missing rows for pay times that never existed, and "
+                             "rebuild_from_obs (which mutates the window's interval) disagrees with live while the window is open")
+
+
+@pytest.mark.parametrize("mode", [ST_ESTIMATED, ST_CONFIRMED])
+def test_same_window_interval_shortening_creates_no_phantom_missing_rows(mode):
+    day = T0 - 86400                                                    # 2026-10-24T00:00:00Z
+    sim = Simulator(mode)
+    sim.run([perp("X-PERP", IV4, day + IV4, "0.0003")], "2026-10-24T00:09:00Z")
+    sim.run([perp("X-PERP", IV4, day + IV4, "0.0003")], "2026-10-24T03:58:00Z")
+    sim.run([perp("X-PERP", IV4, day + 2 * IV4, "0.0003")], "2026-10-24T04:09:00Z")   # 窓 04:00-08:00
+    sim.run([perp("X-PERP", IV1, day + 2 * IV4, "0.0003")], "2026-10-24T07:10:00Z")   # 4h->1h、next_timestamp は 08:00 のまま
+    assert {_key(r) for r in rebuild_from_obs(sim.obs_rows, mode)} == {_key(r) for r in sim.funding_rows}   # 窓はまだ開いている
+    sim.run([perp("X-PERP", IV1, day + 2 * IV4, "0.0003")], "2026-10-24T07:58:00Z")
+    sim.run([perp("X-PERP", IV1, day + 9 * IV1, "0.0003")], "2026-10-24T08:09:00Z")   # 窓 08:00-09:00
+    assert [r for r in sim.funding_rows if r["status"] == ST_MISSING] == []   # 05:00/06:00/07:00 の支払いは無かった
+    assert {_key(r) for r in rebuild_from_obs(sim.obs_rows, mode)} == {_key(r) for r in sim.funding_rows}

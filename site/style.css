@@ -39,12 +39,10 @@ select, input[type=date] { padding: 5px 8px; border-radius: 8px; border: 1px sol
 [hidden] { display: none !important; }
 table.clickable tbody tr { cursor: pointer; }
 table.clickable tbody tr[aria-selected="true"] { background: #1d3a6b; }
-/* ツールチップ: data-tip の文をカーソルを合わせたとき上に出す */
+/* ツールチップ: data-tip の文をカーソルを合わせたとき上に出す(app.js が body 直下の .tipbox に出す。表のスクロール枠で切れないように) */
 .tip { position: relative; cursor: help; }
-.tip::after { content: attr(data-tip); position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%); white-space: nowrap;
-              background: #1e293b; color: var(--fg); border: 1px solid #334155; border-radius: 6px; padding: 4px 9px; font-size: 12px; font-weight: 400;
-              opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 5; }
-.tip:hover::after, .tip:focus::after { opacity: 1; }
+.tipbox { position: fixed; z-index: 50; max-width: min(380px, calc(100vw - 16px)); background: #1e293b; color: var(--fg); border: 1px solid #334155;
+          border-radius: 6px; padding: 4px 9px; font-size: 12px; font-weight: 400; line-height: 1.5; pointer-events: none; }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 6px; background: #1e293b; color: var(--fg3); font-size: 11px; margin-left: 6px; }
 input[type=number] { padding: 5px 8px; border-radius: 8px; border: 1px solid #334155; background: var(--bg); color: var(--fg); width: 9em; }
 .kpi .big { font-size: 22px; }
@@ -98,5 +96,6 @@ input[type=search], input[type=text] { padding: 5px 8px; border-radius: 8px; bor
 .tag.cat { margin-left: 0; }
 .empty.warn { border-color: #a16207; }
 .kpi .v .tag { vertical-align: middle; }
-td .tip::after { white-space: normal; min-width: 14em; text-align: left; }
 .hero .sub { color: var(--fg3); font-size: 12.5px; margin-top: 8px; }
+/* 非公式であることとデータの出所(ヒーローと注記) */
+.hero p.disc { color: var(--fg3); font-size: 12.5px; margin-top: 10px; padding-left: 9px; border-left: 3px solid #fbbf24; }

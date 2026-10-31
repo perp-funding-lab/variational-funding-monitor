@@ -3,7 +3,8 @@
    起動時に data/summary.json と data/swaps.json を、銘柄を選んだとき(とヒートマップの OI 上位分)に data/tickers/<T>.json を読む。
    パスはすべて相対(GitHub Pages のプロジェクトパス配下でも動く)。純粋関数は lib.js(window.VFM)。時刻はすべて UTC。 */
 const {HOUR, DAY, iso, parseTs, fmtTs, staleWarning, anomalyWarning, pct, cls, esc, big, CATEGORIES, categoryLabel, intervalLabel, shortTicker,
-       PRESETS, presetLabel, windowRange, parsePayments, aggPayments, summarizePayments, monthlyCum, monthlyFromSummary} = VFM;
+       PRESETS, presetLabel, presetDays, parsePayments, aggPayments, summarizePayments, expandCum, cumNote, fmtDays,
+       monthlyCum, monthlyFromSummary} = VFM;
 const UP = "#34d399", DOWN = "#fb7185", CUM = "#93c5fd", GRID = "#1e293b";
 const STOP_DAYS = 2;            // 最終観測がこれより古い銘柄に「停止?」
 const HEAT_MAX = 60, HEAT_MONTHS = 18;
@@ -68,6 +69,21 @@ function seg(id, items, current, onpick) {
     el.appendChild(b);
   }
 }
+// ツールチップ(data-tip)。CSS の ::after だと表のスクロール枠で切れるので、body 直下の 1 つの箱を画面の座標で出す
+const tipBox = document.createElement("div");
+tipBox.className = "tipbox"; tipBox.hidden = true; tipBox.setAttribute("role", "tooltip");
+document.body.appendChild(tipBox);
+function showTip(el) {
+  tipBox.textContent = el.dataset.tip; tipBox.hidden = false;
+  const r = el.getBoundingClientRect(), w = tipBox.offsetWidth, h = tipBox.offsetHeight;
+  tipBox.style.left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, document.documentElement.clientWidth - w - 8)) + "px";
+  tipBox.style.top = (r.top - h - 6 >= 8 ? r.top - h - 6 : r.bottom + 6) + "px";
+}
+const tipTarget = e => e.target instanceof Element ? e.target.closest("[data-tip]") : null;
+document.addEventListener("mouseover", e => { const el = tipTarget(e); if (el) showTip(el); else tipBox.hidden = true; });
+document.addEventListener("focusin", e => { const el = tipTarget(e); if (el) showTip(el); });
+document.addEventListener("focusout", () => { tipBox.hidden = true; });
+addEventListener("scroll", () => { tipBox.hidden = true; }, {capture: true, passive: true});
 const hasPlotly = () => typeof Plotly !== "undefined";
 function showEmpty(el, msg, warn) {
   if (hasPlotly() && el._fullLayout) Plotly.purge(el);
@@ -86,17 +102,23 @@ const usdBig = v => (v == null || !Number.isFinite(v)) ? DASH : "$" + big(v);
 const usd = v => (v == null || !Number.isFinite(v)) ? DASH : "$" + v.toLocaleString(undefined, {maximumFractionDigits: v >= 100 ? 2 : 4});
 const share = v => (v == null || !Number.isFinite(v)) ? DASH : (v * 100).toFixed(0) + "%";
 const tsShort = sec => sec == null ? DASH : mute(iso(sec * 1000, true).slice(5));
-const partialMark = (start, days) => `<span class="tip mute" data-tip="${esc(start)} 開始(${Math.round(days)} 日分)">※</span>`;
+/* ※(カーソルを合わせると説明が出る)。説明が無ければ何も出さない */
+const noteMark = text => text ? `<span class="tip mute" data-tip="${esc(text)}">※</span>` : "";
 const EST_TAG = "<span class='tag est'>推定</span>";
 const CUR_TAG = `<span class="tag tip" data-tip="進行中の窓の見込み値(次回支払で確定)">進行中</span>`;
-/* 直近FR: 最後に記録した支払い(last_rate)。収集開始後まだ支払時刻を越えていない銘柄は、進行中の窓の値(cur_rate)を「進行中」の印付きで出す */
+/* 直近FR: 最後に記録した支払い(last_rate)。まだ支払いが無い銘柄と、いちばん新しい支払いが欠測(last_status = missing)の銘柄は、
+   進行中の窓の値(cur_rate)を「進行中」の印付きで出す */
+const hasLastPay = r => r.last_rate != null && r.last_status !== "missing";
 function lastFr(r) {
-  if (r.last_rate != null) return `${sgn(r.last_rate * 100, 4)} / ${sgn(r.last_apr == null ? null : r.last_apr * 100, 1)}${r.last_status === "estimated" ? EST_TAG : ""}`;
+  if (hasLastPay(r)) return `${sgn(r.last_rate * 100, 4)} / ${sgn(r.last_apr == null ? null : r.last_apr * 100, 1)}${r.last_status === "estimated" ? EST_TAG : ""}`;
   if (r.cur_rate != null) return `${sgn(r.cur_rate * 100, 4)} / ${sgn(r.cur_apr == null ? null : r.cur_apr * 100, 1)}${CUR_TAG}`;
   return DASH;
 }
-/* summary の cum[k]({sum, apr, partial, start, days})→ 「累積 / 年率※」 */
-const winFmt = v => (v == null || v.sum == null) ? DASH : `${sgn(v.sum * 100)} / ${sgn(v.apr == null ? null : v.apr * 100, 1)}${v.partial ? partialMark(v.start || "?", v.days || 0) : ""}`;
+/* summary の cum[k](expandCum 済みの {sum, apr, partial, start, days, n_missing})→「累積 / 年率※」。
+   ※ はデータが期間分ないとき・期間内に欠測があるとき(欠測は加えず、観測できた日数で年率換算) */
+const winFmt = v => (v == null || v.sum == null) ? DASH : `${sgn(v.sum * 100)} / ${sgn(v.apr == null ? null : v.apr * 100, 1)}${noteMark(cumNote(v))}`;
+/* 7日 / 30日年率の列: 期間内に欠測があれば ※(欠測の説明だけ) */
+const aprFmt = key => (v, r) => v == null ? DASH : sgn(v * 100, 1) + noteMark(cumNote(r.cum && r.cum[key], false));
 
 // ───────── ヒーローと警告 ─────────
 function renderHero() {
@@ -120,9 +142,9 @@ const PERP_COLS = [
   ["支払間隔", "interval", r => r.interval, v => intervalLabel(v)],
   ["次回支払(UTC)", "next_ts", r => r.next_ts, v => tsShort(v)],
   ["データ開始", "data_start", r => r.data_start || "", v => v ? mute(esc(v)) : DASH],
-  ["直近FR(1回分 / 年率)", "last_rate", r => r.last_rate != null ? r.last_rate : r.cur_rate, (v, r) => lastFr(r)],
-  ["7日年率", "apr7", r => r.apr7, v => v == null ? DASH : sgn(v * 100, 1)],
-  ["30日年率", "apr30", r => r.apr30, v => v == null ? DASH : sgn(v * 100, 1)],
+  ["直近FR(1回分 / 年率)", "last_rate", r => hasLastPay(r) ? r.last_rate : r.cur_rate, (v, r) => lastFr(r)],
+  ["7日年率", "apr7", r => r.apr7, aprFmt("7")],
+  ["30日年率", "apr30", r => r.apr30, aprFmt("30")],
   [() => `${presetLabel(state.preset)}の累積FR / 年率`, "cum", r => (r.cum && r.cum[state.preset]) || null, v => winFmt(v)],
   ["HL 7日年率", "hl_apr7", r => r.hl_apr7, (v, r) => v == null ? DASH : `<span class="tip" data-tip="HL ${esc(r.hl_coin || "?")}">${sgn(v * 100, 1)}</span>`],
   ["差(V−HL)", "diff_pp", r => r.diff_pp, v => sgnPt(v, 1)],
@@ -214,19 +236,24 @@ async function renderDetail() {
     showEmpty(ch, ""); return;
   }
   if (req !== detailReq) return;
-  const interval = d.interval || row.interval;
-  const first = d.payments.length ? d.payments[0].t : null;
-  const [start, end] = windowRange(state.preset, END_MS, first);
-  const pays = d.payments.filter(p => p.t >= start && p.t <= end);
-  if (!pays.length) { kp.innerHTML = `<div class="empty">${label}: この期間(${esc(presetLabel(state.preset))})のデータがありません。</div>`; showEmpty(ch, ""); return; }
-  const firstPaid = d.payments.find(p => p.r != null);
-  const s = summarizePayments(pays, interval, start, end, firstPaid ? firstPaid.t : null);
+  // 期間は (generated − N 日, generated]。累積・年率・※・観測日数は cumStat(builder の cum_stat と同じ)なので一覧の列と一致する
+  const interval = d.interval || row.interval, days = presetDays(state.preset);
+  const s = summarizePayments(d.payments, interval, END_MS, days), pays = s.pays;
+  if (!s.cum) {
+    kp.innerHTML = `<div class="empty">${label}: この期間(${esc(presetLabel(state.preset))})に記録された FR がありません${s.missing ? `(欠測 ${s.missing} 回)` : ""}。</div>`;
+    showEmpty(ch, ""); return;
+  }
   const card = (n, v, s2, c = "") => `<div class="kpi"><div class="n">${n}</div><div class="v big ${c}">${v}</div><div class="s">${s2}</div></div>`;
   const perYear = interval > 0 ? 365 * 86400 / interval : NaN;
+  const from = (days == null || s.partial) ? s.start : iso(END_MS - days * DAY);
+  const lastPay = row.last_status === "missing"
+    ? `<span class="warn">欠測</span>(${row.last_pay_ts == null ? "—" : iso(row.last_pay_ts * 1000, true) + " UTC"})`
+    : row.last_rate == null ? "まだなし"
+    : `<b class="${cls(row.last_rate)}">${pct(row.last_rate * 100, 4)}</b>(年率 ${pct(row.last_apr == null ? null : row.last_apr * 100, 1)}${row.last_status === "estimated" ? "、推定" : ""}${row.last_pay_ts == null ? "" : "、" + iso(row.last_pay_ts * 1000, true) + " UTC"})`;
   kp.innerHTML = [
-    card(`${label} 累積FR(${esc(presetLabel(state.preset))}: ${iso(Math.max(start, s.start))} 〜)`,
+    card(`${label} 累積FR(${esc(presetLabel(state.preset))}: ${esc(from)} 〜)`,
          `<span class="${cls(s.total)}">${pct(s.total)}</span>`,
-         `年率換算 <b class="${cls(s.apr ?? 0)}">${pct(s.apr, 1)}</b>${s.partial ? partialMark(iso(s.start), s.days) : ""}・${s.count.toLocaleString()} 回(${intervalLabel(interval)} ごと)`
+         `年率換算 <b class="${cls(s.apr ?? 0)}">${pct(s.apr, 1)}</b>${noteMark(cumNote(s.cum))}(観測 ${fmtDays(s.days)} 日分)・${s.count.toLocaleString()} 回(${intervalLabel(interval)} ごと)`
          + `${s.nEst ? `・推定 ${s.nEst} 回` : ""}・欠測 <span class="${s.missing ? "warn" : ""}">${s.missing} 回</span><br>`
          + `内訳 <span class="pos">+${s.pos.toFixed(2)}%</span> / <span class="neg">-${Math.abs(s.neg).toFixed(2)}%</span>・マイナス回 ${Number.isNaN(s.neg_share) ? "—" : s.neg_share.toFixed(0) + "%"}`),
     card(`FR の幅(1 回分、${intervalLabel(interval)})`, `${pct(s.max, 4)}`,
@@ -234,7 +261,7 @@ async function renderDetail() {
     card("現在の状態(進行中の窓の値)",
          `${row.cur_rate == null ? "—" : pct(row.cur_rate * 100, 4)}<span class="mute" style="font-size:14px"> /${intervalLabel(row.interval)}</span>${row.cur_rate != null ? CUR_TAG : ""}`,
          `年率換算 <b class="${cls(row.cur_apr ?? 0)}">${row.cur_apr == null ? "—" : pct(row.cur_apr * 100, 1)}</b>・次回支払 ${row.next_ts == null ? "—" : iso(row.next_ts * 1000, true)} UTC`
-         + `${isStopped(row) ? " <span class='tag stop'>停止?</span>" : ""}<br>直近の支払い ${row.last_rate == null ? "まだなし" : `<b class="${cls(row.last_rate)}">${pct(row.last_rate * 100, 4)}</b>(年率 ${pct(row.last_apr == null ? null : row.last_apr * 100, 1)}${row.last_status === "estimated" ? "、推定" : ""}${row.last_pay_ts == null ? "" : "、" + iso(row.last_pay_ts * 1000, true)})`}`
+         + `${isStopped(row) ? " <span class='tag stop'>停止?</span>" : ""}<br>直近の支払い ${lastPay}`
          + `<br>OI ${usdBig(oiOf(row))}(ロング ${share(row.long_share)})・24h 出来高 ${usdBig(row.vol24)}・スプレッド ${row.spread_bps == null ? "—" : row.spread_bps.toFixed(1) + "bp"}・mark ${usd(row.mark)}`),
   ].join("");
   frChart(ch, row, pays, state.freq, s);
@@ -351,13 +378,8 @@ async function main() {
   if (sum.status === "fulfilled" && sum.value && Array.isArray(sum.value.rows)) {
     SUMMARY = sum.value;
     ROWS = SUMMARY.rows.filter(r => r && typeof r.ticker === "string");
-    // cum は [sum, apr, partial(0/1), start, days] の配列で来る(summary.json を小さくするため)。ここで展開する
-    for (const r of ROWS) {
-      if (r.cum) for (const k of Object.keys(r.cum)) {
-        const c = r.cum[k];
-        if (Array.isArray(c)) r.cum[k] = {sum: c[0], apr: c[1], partial: !!c[2], start: c[3], days: c[4]};
-      }
-    }
+    // cum は [sum, apr, partial(0/1), start, days(観測日数), n_missing] の配列で来る(summary.json を小さくするため)。ここで展開する
+    for (const r of ROWS) if (r.cum) for (const k of Object.keys(r.cum)) r.cum[k] = expandCum(r.cum[k]);
     for (const r of ROWS) BY_TICKER.set(r.ticker, r);
     const g = parseTs(SUMMARY.generated), ls = parseTs(SUMMARY.last_success);
     END_MS = Number.isFinite(g) ? g : Date.now();

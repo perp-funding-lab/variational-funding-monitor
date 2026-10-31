@@ -30,8 +30,8 @@ jobs:
         run: python -m vfm archive
       - name: commit and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "perp-funding-lab-collector[bot]"   # コミットの名義は GitHub App の bot に揃える
+          git config user.email "350662295+perp-funding-lab-collector[bot]@users.noreply.github.com"
           git add -A data
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
           git commit -q -m "archive: $(date -u +%Y-%m)"

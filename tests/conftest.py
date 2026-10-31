@@ -114,25 +114,29 @@ class Simulator:
         self.obs_rows: list[dict] = []
         self.funding_rows: list[dict] = []
         self.results = []
+        # (ticker, next_timestamp) ごとの C 行の数と最後の F 行の時刻(prev_changes を毎回全行なめずに済ませる)
+        self._n_change: dict[tuple[str, int], int] = {}
+        self._first_ts: dict[tuple[str, int], str] = {}
+        self._first_iv: dict[tuple[str, int], int] = {}
 
-    def prev_changes(self) -> tuple[dict[str, int], dict[str, str]]:
-        """collect.load_prev_changes と同じ: 現在の窓の C 行の数と、窓の最初の観測時刻(F 行)。"""
+    def prev_changes(self) -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
+        """collect.load_prev_changes と同じ: 現在の窓(直近の観測の next_timestamp)の最新の F 行の時刻と間隔、その後の C 行の数。
+        F 行が来たら C 行の数を 0 に戻すことで「最新の F 行より後の C 行だけ数える」を増分で持つ。"""
         counts: dict[str, int] = {}
         first: dict[str, str] = {}
-        for r in self.obs_rows:
-            cur = self.prev_obs.get(r["ticker"])
-            if not cur or int(r["next_timestamp"]) != int(cur["next_timestamp"]):
-                continue
-            if r["kind"] == KIND_CHANGE:
-                counts[r["ticker"]] = counts.get(r["ticker"], 0) + 1
-            elif r["kind"] == KIND_FIRST:
-                first[r["ticker"]] = r["obs_ts"]
-        return counts, first
+        first_iv: dict[str, int] = {}
+        for t, cur in self.prev_obs.items():
+            k = (t, int(cur["next_timestamp"]))
+            if self._n_change.get(k):
+                counts[t] = self._n_change[k]
+            if k in self._first_ts:
+                first[t], first_iv[t] = self._first_ts[k], self._first_iv[k]
+        return counts, first, first_iv
 
     def run(self, perps, fetch_ts: str):
-        changes, first = self.prev_changes()
+        changes, first, first_iv = self.prev_changes()
         res = process_run(perps, fetch_ts, self.prev_obs, changes, self.prev_fetch_ts, self.last_pay, self.mode, first,
-                          absent_prev=self.absent)
+                          absent_prev=self.absent, prev_first_iv=first_iv)
         self.absent = list(res.absent)
         for r in res.obs_rows:
             cur = self.prev_obs.get(r["ticker"])
@@ -141,6 +145,13 @@ class Simulator:
         for r in res.funding_rows:
             if int(r["pay_ts"]) > self.last_pay.get(r["ticker"], -1):
                 self.last_pay[r["ticker"]] = int(r["pay_ts"])
+        for r in res.obs_rows:
+            k = (r["ticker"], int(r["next_timestamp"]))
+            if r["kind"] == KIND_CHANGE:
+                self._n_change[k] = self._n_change.get(k, 0) + 1
+            elif r["kind"] == KIND_FIRST:
+                self._first_ts[k], self._first_iv[k] = r["obs_ts"], int(r["interval_seconds"])
+                self._n_change[k] = 0
         self.obs_rows.extend(res.obs_rows)
         self.funding_rows.extend(res.funding_rows)
         self.prev_fetch_ts = fetch_ts

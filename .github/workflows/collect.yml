@@ -27,9 +27,8 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+    outputs:
+      skipped: ${{ steps.collect.outputs.skipped }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,8 +66,8 @@ jobs:
       - name: commit and push data
         if: steps.collect.outputs.skipped != 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "perp-funding-lab-collector[bot]"   # コミットの名義は GitHub App の bot に揃える
+          git config user.email "350662295+perp-funding-lab-collector[bot]@users.noreply.github.com"
           git add -A data
           if git diff --cached --quiet; then echo "no data changes"; exit 0; fi
           git commit -q -m "data: $(date -u +%Y-%m-%dT%H:%M:%SZ) (${{ github.event_name }})"
@@ -93,6 +92,16 @@ jobs:
         if: steps.collect.outputs.skipped != 'true'
         with:
           path: site
+
+  # デプロイは別ジョブ: 何もしなかった保険の回(skipped)では Pages のデプロイ記録を作らない
+  deploy:
+    needs: collect
+    if: needs.collect.outputs.skipped != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
       - id: deploy
-        if: steps.collect.outputs.skipped != 'true'
         uses: actions/deploy-pages@v4

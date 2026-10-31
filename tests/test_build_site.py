@@ -59,14 +59,17 @@ def test_cum_stat_partial_boundary_is_one_interval_of_slack():
 def test_cum_stat_excludes_missing_and_never_counts_it_as_zero():
     base = payments_8h(9)
     with_missing = sorted(base + [(T0 - 9 * IV, None, "missing"), (T0 - 10 * IV, 0.0, "missing")])
-    assert cum_stat(with_missing, NOW_TS, 7, IV) == cum_stat(base, NOW_TS, 7, IV)   # 先頭の missing は開始日も変えない
-    # 途中の支払を missing に置き換えると、その分だけ減る
+    s_with, s_base = cum_stat(with_missing, NOW_TS, 7, IV), cum_stat(base, NOW_TS, 7, IV)
+    assert s_with["n_missing"] == 2 and s_base["n_missing"] == 0        # 欠測は数えるが足さない(rate 0.0 の missing も)
+    assert {k: v for k, v in s_with.items() if k != "n_missing"} == {k: v for k, v in s_base.items() if k != "n_missing"}   # 開始日も変えない
+    # 途中の支払を missing に置き換えると、その分だけ累積が減り、観測できた日数も 1 間隔減る(年率は薄まらない)
     mid = list(base)
     mid[4] = (mid[4][0], None, "missing")
-    s_mid, s_base = cum_stat(mid, NOW_TS, 7, IV), cum_stat(base, NOW_TS, 7, IV)
-    assert s_mid["n"] == s_base["n"] - 1
+    s_mid = cum_stat(mid, NOW_TS, 7, IV)
+    assert s_mid["n"] == s_base["n"] - 1 and s_mid["n_missing"] == 1
     assert s_mid["sum"] == pytest.approx(s_base["sum"] - 0.0001)
-    assert s_mid["days"] == s_base["days"]
+    assert s_mid["days"] == pytest.approx(s_base["days"] - IV / 86400)
+    assert s_mid["apr"] == pytest.approx(s_base["apr"]) == pytest.approx(annualize(0.0001, IV))
     # rate が無い行は status が何でも足さない
     assert cum_stat(base + [(T0 + IV, None, "estimated")], NOW_TS + IV, 7, IV)["n"] == 9
 
@@ -90,7 +93,7 @@ def test_cum_stat_returns_none_without_valid_payments():
 
 def test_cum_stat_actual_days_has_one_interval_floor():
     s = cum_stat([(NOW_TS, 0.0002, "confirmed")], NOW_TS, 7, IV)
-    assert s["days"] == round(IV / 86400, 2) and s["apr"] == pytest.approx(0.0002 * 1095)
+    assert s["days"] == pytest.approx(IV / 86400) and s["apr"] == pytest.approx(0.0002 * 1095)   # days は丸めない
     assert s["partial"] is True and s["n"] == 1
 
 
@@ -200,7 +203,7 @@ def test_build_summary_rows_and_ticker_files(tmp_path):
     assert btc["apr7"] == pytest.approx(n7 * 0.0001 * 365 / 7)
     assert btc["apr30"] is None and btc["cum"]["30"][2] == 1
     assert btc["cum"]["all"][2] == 0 and btc["cum"]["all"][0] == pytest.approx(30 * 0.0001) and btc["cum"]["all"][4] == 10.0
-    assert btc["cum"]["7"][2] == 0 and btc["cum"]["7"][4] == 7.0 and len(btc["cum"]["7"]) == 5
+    assert btc["cum"]["7"][2] == 0 and btc["cum"]["7"][4] == 7.0 and len(btc["cum"]["7"]) == 6 and btc["cum"]["7"][5] == 0
     assert btc["n_pay"] == 30 and btc["n_missing"] == 0
     assert btc["mark"] == pytest.approx(80433.95, rel=1e-5) and btc["mark"] == 80433.9     # 行の float は有効数字 6 桁
     assert btc["data_start"] == "2026-10-15" and btc["category"] == "crypto"
@@ -382,16 +385,17 @@ def test_cum_stat_partial_apr_equals_annualized_constant_rate(n):
         s = cum_stat(pays, NOW_TS, days, IV)
         if days is not None and n * IV >= days * 86400 + IV:
             continue   # 窓が揃っている場合は別のテスト
-        assert s["n"] == n and s["days"] == round(n * IV / 86400, 2)
+        assert s["n"] == n and s["days"] == pytest.approx(n * IV / 86400)
         assert s["apr"] == pytest.approx(annualize(0.0002, IV)), (n, days)    # 支払 2 回で 2 倍に跳ねない
         assert s["partial"] is (days is not None)
 
 
-def test_cum_stat_partial_gap_lowers_apr_over_the_covered_span():
+def test_cum_stat_missing_window_does_not_dilute_the_apr():
     pays = [(T0 - 2 * IV, 0.0003, "estimated"), (T0 - IV, None, "missing"), (T0, 0.0003, "estimated")]
     s = cum_stat(pays, NOW_TS, 7, IV)
-    assert s["n"] == 2 and s["days"] == 1.0 and s["sum"] == pytest.approx(0.0006)
-    assert s["apr"] == pytest.approx(annualize(0.0003, IV) * 2 / 3)
+    assert s["n"] == 2 and s["n_missing"] == 1 and s["sum"] == pytest.approx(0.0006)
+    assert s["days"] == pytest.approx(2 * IV / 86400)                  # 観測できた 2 窓分だけ
+    assert s["apr"] == pytest.approx(annualize(0.0003, IV))            # 欠測の窓を 0 のように数えない
 
 
 def test_cum_stat_non_clamped_window_still_uses_elapsed_time():

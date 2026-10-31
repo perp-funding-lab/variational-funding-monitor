@@ -39,6 +39,10 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
 ### 2.2 確定 FR の作り方(funding_mode)
 - `confirmed`(確定値型): `next_timestamp = T` の窓で最初に観測した `last.interval_rate` を、`pay_ts = T − interval_seconds` の FR として `confirmed` で記録する(`basis_obs_ts` はその観測時刻)。
 - `estimated`(見込み値型): 窓 T が終わった(`next_timestamp` が進んだ)とき、T の直前の最後の観測値を `pay_ts = T` の FR として `estimated` で記録する。
+  最後の観測が T − 30 分より前(または窓の開始以前)なら推定せず `missing`。
+- 支払間隔の変更: 窓の途中で間隔が変わり、新しい next_timestamp が旧窓の中に入る(8h→4h)か旧窓の支払時刻より前に後ろへ動く(4h→8h)ときは、
+  旧窓を支払なしで打ち切り、新しい窓を F 行から追う(FR も欠測も作らない)。間隔が同じままの巻き戻り・早すぎる移動は記録せず不在扱い。
+- 不在: 取得に居なかった銘柄(funding が null・一覧に無い・値が不整合)は `meta.absent` に残し、次回はその銘柄に「直前の取得時刻」を最後の観測として使わない。
 - 欠測: 新しく記録する `pay_ts` と、その銘柄の直前の記録との間に `interval_seconds` の刻みで支払時刻があれば、その分を `missing`(rate 空欄)で埋める。0 にはしない。
 - 間隔の変更: 刻みは「新しい窓の interval_seconds」を T から逆算して使う。
 - 新規上場: 直前の記録が無い銘柄は欠測を作らない。上場廃止: 単に新しい行が増えない(ページでは最終観測が 2 日以上前の銘柄に印を付ける)。
@@ -47,8 +51,10 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
 
 ## 3. 年率換算
 - 1 回分の FR `r`、間隔 `s` 秒 → 年率 = `r × (365 × 86400 / s)`。4 時間なら ×2190、8 時間なら ×1095、1 時間なら ×8760。API の `annualized_rate` もこの式(実測で一致)。
-- 期間の累積 FR = 期間内の `confirmed`/`estimated` の `interval_rate` の合計(`missing` は加えない)。年率 = 累積 ÷ 実日数 × 365。
-- データが期間分ない銘柄: 開始日からの累積を実日数で年率換算し `partial = true`(ページでは ※)。
+- 期間 (now − N 日, now] の累積 FR = 期間内の `confirmed`/`estimated` の `interval_rate` の合計(`missing` は加えない)。
+- 期間の年率 = 累積 ÷ 観測できた日数 × 365。観測できた日数 = 期間内の(欠測でない)支払いの間隔の合計(支払いごとの間隔。欠測の窓は分母に入れない)。
+- データが期間分ない銘柄(最初の支払いが期間の開始 + 1 間隔より後): `partial = true`(ページでは ※)。期間内に欠測があっても ※(説明に欠測数)。
+- 実装は `src/vfm/aggregate.py` の `cum_stat`(ページの JS の `cumStat` と同じ定義。`tests/fixtures/cross_lang.json` で一致を確認)。
 - 7 日年率 / 30 日年率の列: データが 7 日 / 30 日分揃うまで `null`(ページでは「—」)。
 - HL 7 日年率 = 直近 7 日の毎時 FR の合計 ÷ 7 × 365。
 
@@ -76,7 +82,7 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
       "cur_rate": 0.0001, "cur_apr": 0.1095,
       "last_rate": 0.0001, "last_apr": 0.1095, "last_status": "estimated", "last_pay_ts": 1792857600,
       "apr7": null, "apr30": null,
-      "cum": {"7": [0.0003, 0.1095, 1, "2026-10-25", 1.0],
+      "cum": {"7": [0.0003, 0.1095, 1, "2026-10-25", 1.0, 0],
               "30": [...], "90": [...], "180": [...], "365": [...], "all": [...]},
       "hl_coin": "BTC", "hl_apr7": 0.1012, "diff_pp": 0.83,
       "oi": 7299715.0, "long_oi": 5250294.0, "short_oi": 2049421.0, "long_share": 0.72,
@@ -86,19 +92,27 @@ hl.yml (1 日 1 回): python -m vfm hl-update → data/hl/hl_7d.json を更新 �
   ]
 }
 ```
+- `listed` は最新の取得に居るか(false = 掲載終了か一時的に無い。履歴があれば行を残し、ページは「停止?」を付ける)。
 - 数値はすべて有効数字 6 桁に丸める(OI や出来高のドル額も。ファイルサイズのため)。`rate`/`apr` は小数(0.0001 = 0.01%)。`diff_pp` は 7 日年率の差(Variational − HL)を %ポイントで。`cur_rate`/`cur_apr` は API がいま表示している進行中の窓の値、`last_*` は最後に記録した支払(収集開始後の最初の支払まで null)。
-- `cum[k]` は `[sum, apr, partial(0/1), start(YYYY-MM-DD), days]` の配列(ファイルを小さくするため。ページ側で展開)。`null` の場合がある(データなし)。`apr7`/`apr30` はデータ日数不足なら `null`。
+- `cum[k]` は `[sum, apr, partial(0/1), start(YYYY-MM-DD), days(観測できた日数), n_missing]` の配列(ファイルを小さくするため。ページ側で展開)。`null` の場合がある(データなし)。`apr7`/`apr30` はデータ日数不足なら `null`。
 
 ### `tickers/<TICKER>.json`(行クリック時に読む)
 ```json
-{"ticker": "BTC-PERP", "interval": 28800,
- "payments": [[1792857600, 0.0001, "c"], [1792886400, null, "m"], [1792915200, 0.00012, "e"]]}
+{"ticker": "BTC-PERP", "interval": 14400,
+ "payments": [[1792857600, 0.0001, "c", 28800], [1792886400, null, "m"], [1792900800, 0.00012, "e"]]}
 ```
-`payments` は pay_ts 昇順。status は `c` confirmed / `e` estimated / `m` missing。
+`payments` は pay_ts 昇順。status は `c` confirmed / `e` estimated / `m` missing。4 つ目は支払間隔で、今の間隔と違う支払い(間隔の変更前)にだけ付く。
+`last_status` / `last_pay_ts` はいちばん新しい支払いの行(欠測なら `last_rate` は null)。
+
+### `monthly.json`(ヒートマップ用)
+```json
+{"generated": "...", "months": ["2026-10", "2026-11"], "rows": {"BTC-PERP": {"2026-10": 0.0012, "2026-11": 0.0031}}}
+```
+直近 18 か月の月ごとの累積(小数、欠測は加えない)。ページはこれでヒートマップを描く(銘柄別ファイルを 60 個読まない)。
 
 ### `swaps.json`
 ```json
-{"generated": "...", "rows": [{"ticker": "COPP-SWAP", "name": "Swap on Copper Spot", "mark": 6.566,
+{"generated": "...", "snap_ts": "取得時刻", "rows": [{"ticker": "COPP-SWAP", "name": "Swap on Copper Spot", "mark": 6.566,
   "long_oi": 922408, "short_oi": 1157564, "vol24": 0, "interval": 86400, "next_ts": null,
   "last": {"ann_long": 0.1955, "ann_short": 0.1955, "int_long": 0.0005431, "int_short": 0.0005431},
   "next": null, "snap_ts": "..."}]}

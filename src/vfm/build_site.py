@@ -7,6 +7,7 @@ import shutil
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .aggregate import cum_stat, monthly_sums
 from .categories import classify, load_overrides
 from .collect import LATEST_CACHE
 from .funding import ST_MISSING
@@ -42,29 +43,6 @@ def _r(v, sig: int = 6):
     if isinstance(v, list):
         return [_r(x, sig) for x in v]
     return v
-
-
-def cum_stat(payments: list[tuple[int, float | None, str]], now_ts: int, days: int | None, interval: int) -> dict | None:
-    """payments: (pay_ts, rate or None, status) の昇順。直近 days 日(None なら全期間)の累積と年率。
-    データが期間分ない銘柄は開始日からの累積を「支払が実際に覆う期間」(最初の支払の窓の開始 〜 最後の支払)で年率換算し
-    partial を付ける(経過時間で割ると支払 2 回で 2 倍に跳ねるため)。missing は足さない。"""
-    valid = [(t, r) for t, r, s in payments if s != ST_MISSING and r is not None]
-    if not valid:
-        return None
-    first = valid[0][0]
-    clamped = days is None or first > now_ts - days * 86400
-    frm = first if clamped else now_ts - days * 86400
-    partial = False if days is None else first > now_ts - days * 86400 + interval
-    sel = [(t, r) for t, r in valid if frm <= t <= now_ts]
-    if not sel:
-        return None
-    if clamped:
-        actual = (sel[-1][0] - (first - interval)) / 86400
-    else:
-        actual = (now_ts - frm) / 86400
-    actual = max(actual, interval / 86400)
-    total = sum(r for _, r in sel)
-    return {"sum": total, "apr": total * 365 / actual, "partial": partial, "start": day_str(from_unix(first)), "days": round(actual, 2), "n": len(sel)}
 
 
 def _latest_from_fallback(paths: DataPaths, obs: dict[str, dict]) -> dict:
@@ -110,8 +88,10 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
     intervals: dict[str, int] = {}
     for r in load_all_funding(paths):
         t = r["ticker"]
-        pays.setdefault(t, []).append((int(r["pay_ts"]), _f(r.get("interval_rate")), r["status"]))
-        intervals[t] = int(r["interval_seconds"])
+        iv_row = int(r["interval_seconds"]) if r.get("interval_seconds") else None
+        pays.setdefault(t, []).append((int(r["pay_ts"]), _f(r.get("interval_rate")), r["status"], iv_row))
+        if iv_row:
+            intervals[t] = iv_row
     for v in pays.values():
         v.sort()
 
@@ -128,7 +108,7 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
         perps.append({"ticker": t, "interval_seconds": int(o.get("interval_seconds") or intervals.get(t) or 0) or None,
                       "next_timestamp": int(o["next_timestamp"]) if o.get("next_timestamp") else None,
                       "interval_rate": o.get("interval_rate"), "annualized_rate": o.get("annualized_rate")})
-    month_keys = sorted({_month_key(ts) for pl in pays.values() for ts, _, _ in pl})[-18:]
+    month_keys = sorted({_month_key(p[0]) for pl in pays.values() for p in pl})[-18:]
     monthly: dict[str, dict] = {}
     rows = []
     missing_total = 0
@@ -138,16 +118,19 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
         if not iv:
             continue
         pl = pays.get(t, [])
-        n_missing = sum(1 for _, _, s in pl if s == ST_MISSING)
+        n_missing = sum(1 for p in pl if p[2] == ST_MISSING)
         missing_total += n_missing
-        valid = [(ts, r, s) for ts, r, s in pl if s != ST_MISSING and r is not None]
-        last_pay = valid[-1] if valid else None
+        valid = [p for p in pl if p[2] != ST_MISSING and p[1] is not None]
+        # 直近の支払い = いちばん新しい行。それが欠測なら rate は None(古い支払いを「直近」と見せない)
+        latest_row = pl[-1] if pl else None
+        last_pay = latest_row if (latest_row and latest_row[2] != ST_MISSING and latest_row[1] is not None) else None
         cur_rate = _f(p.get("interval_rate"))
         cum = {k: cum_stat(pl, now_ts, d, iv) for k, d in PRESETS.items()}
         apr7 = cum["7"]["apr"] if cum["7"] and not cum["7"]["partial"] else None
         apr30 = cum["30"]["apr"] if cum["30"] and not cum["30"]["partial"] else None
         # summary.json を小さくするため配列で持つ(ページ側で {sum, apr, partial, start, days} に展開する)
-        cum_compact = {k: ([c["sum"], c["apr"], 1 if c["partial"] else 0, c["start"], c["days"]] if c else None) for k, c in cum.items()}
+        cum_compact = {k: ([c["sum"], c["apr"], 1 if c["partial"] else 0, c["start"], round(c["days"], 2), c["n_missing"]] if c else None)
+                       for k, c in cum.items()}
         hl_coin = (mapping.get(t) or {}).get("hl_coin") or None
         hl_apr7 = (hl.get("coins", {}).get(hl_coin) or {}).get("apr7d") if hl_coin else None
         long_oi, short_oi = _f(p.get("long_oi")) or 0.0, _f(p.get("short_oi")) or 0.0
@@ -160,8 +143,9 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
             "ticker": t, "name": names.get(t, t), "category": classify(t, names.get(t, ""), overrides, hl_main, hip3_equity),
             "interval": iv, "next_ts": p.get("next_timestamp"), "data_start": data_start,
             "cur_rate": cur_rate, "cur_apr": annualize(cur_rate, iv) if cur_rate is not None else None,
-            "last_rate": last_pay[1] if last_pay else None, "last_apr": annualize(last_pay[1], iv) if last_pay else None,
-            "last_status": last_pay[2] if last_pay else None, "last_pay_ts": last_pay[0] if last_pay else None,
+            "last_rate": last_pay[1] if last_pay else None,
+            "last_apr": annualize(last_pay[1], last_pay[3] or iv) if last_pay else None,
+            "last_status": latest_row[2] if latest_row else None, "last_pay_ts": latest_row[0] if latest_row else None,
             "apr7": apr7, "apr30": apr30, "cum": cum_compact,
             "hl_coin": hl_coin, "hl_apr7": hl_apr7,
             "diff_pp": (apr7 - hl_apr7) * 100 if (apr7 is not None and hl_apr7 is not None) else None,
@@ -172,15 +156,12 @@ def build(project_root: Path, out_dir: Path, *, now: _dt.datetime | None = None)
             "listed": t in listed,
         }))
         # 月ごとの累積(ヒートマップ用。銘柄別ファイルを 60 個読まずに済むように)
-        msum: dict[str, float] = {}
-        for ts, rr, st in valid:
-            k = _month_key(ts)
-            if k in month_keys:
-                msum[k] = msum.get(k, 0.0) + rr
+        msum = {k: v for k, v in monthly_sums(pl).items() if k in month_keys}
         if msum:
             monthly[t] = _r(msum)
-        save_json(tick_dir / f"{t}.json", {"ticker": t, "interval": iv,
-                                            "payments": [[ts, r, STATUS_CODE.get(s, s)] for ts, r, s in pl]}, compact=True)
+        # 1 支払い = [pay_ts, rate|null, c/e/m]。支払間隔が今と違う支払い(間隔の変更前)だけ 4 つ目に間隔を付ける
+        save_json(tick_dir / f"{t}.json", {"ticker": t, "interval": iv, "payments": [
+            [p[0], p[1], STATUS_CODE.get(p[2], p[2])] + ([p[3]] if p[3] and p[3] != iv else []) for p in pl]}, compact=True)
     rows.sort(key=lambda r: -(r["oi"] or 0))
     last_ok = meta.get("last_success_ts")
     stale_h = (now - parse_iso(last_ok)).total_seconds() / 3600 if last_ok else None

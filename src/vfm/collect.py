@@ -48,21 +48,32 @@ def _dec2(v: str | None) -> str:
         return ""
 
 
-def load_prev_changes(paths: DataPaths, prev_obs: dict[str, dict]) -> tuple[dict[str, int], dict[str, str]]:
-    """銘柄ごとに、現在の窓(prev_obs の next_timestamp)で記録した C 行の数と、窓の最初の観測時刻(F 行)。直近 2 日分のログで足りる。"""
-    counts: dict[str, int] = {}
-    first: dict[str, str] = {}
-    for p in iter_csv_files(paths.obs_dir, newest_first=True)[:2]:
+def load_prev_changes(paths: DataPaths, prev_obs: dict[str, dict]) -> tuple[dict[str, int], dict[str, str], dict[str, int]]:
+    """銘柄ごとの現在の窓(prev_obs の next_timestamp)について、窓の最初の観測(同じ next_timestamp の最新の F 行)の時刻と間隔、
+    それ以降の C 行の数。打ち切られた窓と同じ next_timestamp がまた来ても、古い窓の行は混ぜない。
+    読むのは、いちばん古い直近の観測の前日以降の観測ログ(ふつうは今日と昨日の 2 ファイル)。"""
+    if not prev_obs:
+        return {}, {}, {}
+    days = [str(r.get("obs_ts") or "")[:10] for r in prev_obs.values()]
+    since = "" if not all(days) else (parse_iso(min(days) + "T00:00:00Z") - _dt.timedelta(days=1)).strftime("%Y-%m-%d")
+    first_ts: dict[str, str] = {}
+    first_iv: dict[str, int] = {}
+    c_rows: dict[str, list[str]] = {}
+    for p in iter_csv_files(paths.obs_dir):
+        if p.name[:10] < since:
+            continue
         for r in read_csv(p):
-            cur = prev_obs.get(r["ticker"])
-            if not cur or r["next_timestamp"] != cur["next_timestamp"]:
+            t = r["ticker"]
+            cur = prev_obs.get(t)
+            if not cur or str(r["next_timestamp"]) != str(cur["next_timestamp"]):
                 continue
-            if r["kind"] == "C":
-                counts[r["ticker"]] = counts.get(r["ticker"], 0) + 1
-            elif r["kind"] == "F":
-                first[r["ticker"]] = r["obs_ts"]
-    return counts, first
-
+            if r["kind"] == "F":
+                if r["obs_ts"] >= first_ts.get(t, ""):
+                    first_ts[t], first_iv[t] = r["obs_ts"], int(r["interval_seconds"])
+            elif r["kind"] == "C":
+                c_rows.setdefault(t, []).append(r["obs_ts"])
+    counts = {t: sum(1 for ts in lst if ts >= first_ts.get(t, "")) for t, lst in c_rows.items()}
+    return {t: n for t, n in counts.items() if n}, first_ts, first_iv
 
 def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None, scheduled: _dt.datetime | None = None,
              trigger: str = "manual", fetch=_fetch.fetch_stats, project_root: Path | None = None,
@@ -107,10 +118,10 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     row.update(n_listings=len(stats.perps) + len(stats.swaps), n_perp=len(stats.perps), n_swap=len(stats.swaps))
 
     prev_obs = load_last_obs(paths)
-    prev_changes, prev_first = load_prev_changes(paths, prev_obs)
+    prev_changes, prev_first, prev_first_iv = load_prev_changes(paths, prev_obs)
     last_pay = load_last_pay(paths)
     result = process_run(stats.perps, fetch_ts, prev_obs, prev_changes, meta.get("last_success_ts"), last_pay, mode, prev_first,
-                         absent_prev=meta.get("absent") or [])
+                         absent_prev=meta.get("absent") or [], prev_first_iv=prev_first_iv)
 
     # 観測ログ: 行ごとの obs_ts の日付のファイルへ(L 行は前回の取得時刻なので前日のことがある)
     by_day: dict[str, list[dict]] = {}
@@ -151,10 +162,13 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
          "last": s.last, "next": s.next} for s in stats.swaps]})
 
     # 銘柄名(新規上場のときだけ変わる。取得に失敗した回の build でも名前を出せるように持つ)
-    names = {p.ticker: p.name for p in stats.perps}
-    names.update({s.ticker: s.name for s in stats.swaps})
+    # 掲載が終わった銘柄の名前も残す(ページに「停止?」付きで残るので)
     names_path = Path(data_root) / "names.json"
-    if load_json(names_path, None) != names:
+    old_names = load_json(names_path, None) or {}
+    names = dict(old_names)
+    names.update({p.ticker: p.name for p in stats.perps})
+    names.update({s.ticker: s.name for s in stats.swaps})
+    if names != old_names:
         save_json(names_path, names, compact=True)
 
     # build 用の最新値(gitignore 対象)

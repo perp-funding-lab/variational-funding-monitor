@@ -265,11 +265,23 @@ def test_load_prev_changes_counts_c_rows_and_first_ts_of_current_window(tmp_path
     ]
     append_csv(paths.obs_dir / "2026-10-24.csv", OBS_HEADER, rows)
     prev = {"X": {"next_timestamp": "1"}}
-    changes, first = load_prev_changes(paths, prev)
-    assert changes == {"X": 2} and first == {"X": "2026-10-24T10:00:00Z"}
-    changes, first = load_prev_changes(paths, {"X": {"next_timestamp": "2"}})
-    assert changes == {} and first == {"X": "2026-10-24T18:00:00Z"}
-    assert load_prev_changes(paths, {}) == ({}, {})
+    changes, first, first_iv = load_prev_changes(paths, prev)
+    assert changes == {"X": 2} and first == {"X": "2026-10-24T10:00:00Z"} and first_iv == {"X": 28800}
+    changes, first, first_iv = load_prev_changes(paths, {"X": {"next_timestamp": "2", "obs_ts": "2026-10-24T18:00:00Z"}})
+    assert changes == {} and first == {"X": "2026-10-24T18:00:00Z"} and first_iv == {"X": 28800}
+    assert load_prev_changes(paths, {}) == ({}, {}, {})
+
+
+def test_load_prev_changes_uses_latest_first_row_and_ignores_abandoned_window_with_same_next_timestamp(tmp_path):
+    # 8h 窓(nt = N)を途中で 4h に打ち切り、4h 窓を 2 つ経て同じ nt = N の窓がまた来た: 古い窓の F / C 行は混ぜない
+    paths = DataPaths(tmp_path / "data")
+    paths.ensure()
+    row = lambda ts, nt, iv, kind: {"obs_ts": ts, "ticker": "X", "interval_seconds": iv, "next_timestamp": nt,
+                                     "interval_rate": "1", "annualized_rate": "", "kind": kind}
+    append_csv(paths.obs_dir / "2026-10-23.csv", OBS_HEADER, [row("2026-10-23T16:30:00Z", 9, 28800, "F"), row("2026-10-23T16:40:00Z", 9, 28800, "C")])
+    append_csv(paths.obs_dir / "2026-10-24.csv", OBS_HEADER, [row("2026-10-24T04:10:00Z", 9, 14400, "F"), row("2026-10-24T05:10:00Z", 9, 14400, "C")])
+    changes, first, first_iv = load_prev_changes(paths, {"X": row("2026-10-24T05:10:00Z", 9, 14400, "C")})
+    assert first == {"X": "2026-10-24T04:10:00Z"} and first_iv == {"X": 14400} and changes == {"X": 1}
 
 
 @pytest.mark.parametrize("v,expected", [
@@ -418,3 +430,18 @@ def test_ahead_of_clock_sample_is_logged_but_not_recorded(tmp_path):
     meta = load_json(data / "meta.json", None)
     assert meta["absent"] == ["SOL-PERP"] and meta["anomalies_by_day"]["2026-10-24"] == {"n": 0, "checked": 0}
     assert not (data / "funding").exists() or list((data / "funding").iterdir()) == []
+
+
+def test_names_json_keeps_delisted_names_and_takes_renames(tmp_path):
+    data = tmp_path / "data"
+    doc = load_doc()
+    run_once(data, SETTINGS, now=parse_iso(RUN1), fetch=fake_fetch(body(doc)), project_root=tmp_path)
+    assert load_json(data / "names.json", None)["ETH-PERP"] == "Ethereum"
+    doc2 = copy.deepcopy(doc)
+    doc2["listings"] = [x for x in doc2["listings"] if x["ticker"] != "ETH-PERP"]      # 掲載が終わった
+    get_listing(doc2, "SOL-PERP")["name"] = "Solana (renamed)"                         # 改名
+    run_once(data, SETTINGS, now=parse_iso(RUN2), fetch=fake_fetch(body(doc2)), project_root=tmp_path)
+    names = load_json(data / "names.json", None)
+    assert names["ETH-PERP"] == "Ethereum"                 # 次の取得に居なくても名前は残る
+    assert names["SOL-PERP"] == "Solana (renamed)"         # 今の掲載が上書きする
+    assert names["BTC-PERP"] == "Bitcoin" and names["COPP-SWAP"] == "Swap on Copper Spot"

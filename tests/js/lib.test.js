@@ -37,6 +37,10 @@ test("anomalyWarning: anomaly_warn をそのまま使い、方式で文面が変
 
 test("parsePayments: 欠測は r=null、壊れた要素は捨てる、時刻順", () => {
   const p = L.parsePayments({payments: [[200, 0.0002, "e"], [100, 0.0001, "c"], [300, null, "m"], "junk", [400, "x", "c"]]});
+test("parsePayments: 4 つ目の要素(その支払いの間隔)は iv、語の status も受け付ける", () => {
+  const p = L.parsePayments({payments: [[100, 0.0001, "c", 28800], [200, 0.0002, "estimated"], [300, null, "missing", 14400], [400, 0.0003, "confirmed", 0]]});
+  assert.deepEqual(p, [{t: 100000, r: 0.0001, s: "c", iv: 28800}, {t: 200000, r: 0.0002, s: "e"}, {t: 300000, r: null, s: "m", iv: 14400}, {t: 400000, r: 0.0003, s: "c"}]);
+});
   assert.deepEqual(p, [{t: 100000, r: 0.0001, s: "c"}, {t: 200000, r: 0.0002, s: "e"}, {t: 300000, r: null, s: "m"}, {t: 400000, r: null, s: "m"}]);
   assert.deepEqual(L.parsePayments(null), []);
 });
@@ -56,26 +60,78 @@ test("aggPayments D: 区間の合計、推定を含む区間は est、欠測だ�
   assert.deepEqual(a.map(p => p.est), [false, false, false, true]);
   assert.deepEqual(a.map(p => p.miss), [0, 2, 0, 0]);
 });
-test("summarizePayments: 欠測は件数のみ、年率は実日数、期間分ないデータは partial", () => {
-  const start = T0 - 7 * L.DAY, end = T0, first = T0 - 2 * L.DAY;
-  const pays = [{t: first, r: 0.001, s: "c"}, {t: first + 8 * L.HOUR, r: null, s: "m"}, {t: first + 16 * L.HOUR, r: -0.0005, s: "e"}];
-  const s = L.summarizePayments(pays, 28800, start, end);
-  assert.equal(s.count, 2); assert.equal(s.missing, 1); assert.equal(s.nEst, 1);
-  assert.ok(Math.abs(s.total - 0.05) < 1e-9);
-  // 期間分のデータが無いときは、支払が覆う期間(最初の支払の窓の開始 〜 最後の支払 = 8h + 16h = 1 日)で年率換算(builder の cum_stat と同じ)
-  assert.ok(Math.abs(s.apr - 0.05 / 1 * 365) < 1e-9);
-  assert.ok(Math.abs(s.days - 1) < 1e-9);
-  // 期間分のデータがあるときは期間の長さで割る(first を期間開始より前に置く)
-  const s2 = L.summarizePayments(pays, 28800, start, end, start - 30 * L.DAY);
-  assert.ok(Math.abs(s2.apr - 0.05 / 7 * 365) < 1e-9); assert.equal(s2.partial, false);
-  assert.equal(s.partial, true); assert.equal(s.start, first);
+test("cumStat: 期間は (now − days, now] の半開区間(開始ちょうどは入らず、now ちょうどは入る)", () => {
+  const now = T0, H8 = 8 * L.HOUR;
+  const pays = [{t: now - 7 * L.DAY, r: 0.001, s: "c"}, {t: now - 7 * L.DAY + H8, r: 0.002, s: "c"}, {t: now, r: 0.003, s: "c"}, {t: now + H8, r: 0.5, s: "c"}];
+  const c = L.cumStat(pays, now, 7, 28800);
+  assert.equal(c.n, 2);                                        // now − 7 日ちょうどの支払いと now より後の支払いは入らない
+  assert.ok(Math.abs(c.sum - 0.005) < 1e-15);
+  assert.equal(c.partial, false);                              // 最初の支払いは開始 + 1 間隔より前
+  const all = L.cumStat(pays, now, null, 28800);
+  assert.equal(all.n, 3); assert.equal(all.partial, false);   // 全期間は now 以前すべて、partial にならない
+});
+test("cumStat: 年率は観測できた日数(欠測は分子にも分母にも入れない、間隔は支払いごと)", () => {
+  const now = T0, H = L.HOUR;
+  const pays = L.parsePayments({payments: [
+    [(now - 3 * L.DAY) / 1000, 0.0008, "c", 28800],             // 間隔の変更前(8h)
+    [(now - 2 * L.DAY) / 1000, null, "m"],
+    [(now - L.DAY) / 1000, 0.0004, "e"],
+    [(now - 12 * H) / 1000, 0.0004, "c"]]});
+  const c = L.cumStat(pays, now, null, 14400);
+  assert.ok(Math.abs(c.days - (28800 + 14400 + 14400) / 86400) < 1e-15);   // 8h + 4h + 4h = 2/3 日
+  assert.ok(Math.abs(c.sum - 0.0016) < 1e-15);
+  assert.ok(Math.abs(c.apr - 0.0016 * 365 / (2 / 3)) < 1e-12);
+  assert.equal(c.n, 3); assert.equal(c.n_missing, 1); assert.equal(c.start, L.iso(now - 3 * L.DAY));
+});
+test("cumStat: partial は最初の支払いが開始 + 1 間隔より後のとき、データが無ければ null", () => {
+  const now = T0, start = now - 7 * L.DAY;
+  const at = t => [{t, r: 0.001, s: "c"}, {t: now, r: 0.001, s: "c"}];
+  assert.equal(L.cumStat(at(start + 8 * L.HOUR), now, 7, 28800).partial, false);   // ちょうど 1 間隔後はまだ「期間分ある」
+  assert.equal(L.cumStat(at(start + 8 * L.HOUR + 1000), now, 7, 28800).partial, true);
+  assert.equal(L.cumStat([{t: now - L.DAY, r: null, s: "m"}], now, 7, 28800), null);            // 欠測だけ
+  assert.equal(L.cumStat([{t: now - 30 * L.DAY, r: 0.001, s: "c"}], now, 7, 28800), null);      // 期間内に無い
+  assert.equal(L.cumStat([], now, null, 28800), null);
+});
+test("summarizePayments: 累積・年率・※・観測日数は cumStat、その他は同じ期間の支払いから", () => {
+  const now = T0, first = now - 2 * L.DAY;
+  const pays = [{t: first, r: 0.001, s: "c"}, {t: first + 8 * L.HOUR, r: null, s: "m"}, {t: first + 16 * L.HOUR, r: -0.0005, s: "e"}, {t: now - 30 * L.DAY - 1, r: 0.9, s: "c"}].sort((a, b) => a.t - b.t);
+  const s = L.summarizePayments(pays, 28800, now, 7), c = L.cumStat(pays, now, 7, 28800);
+  assert.deepEqual(s.cum, c);
+  assert.equal(s.count, 2); assert.equal(s.missing, 1); assert.equal(s.missing, c.n_missing); assert.equal(s.nEst, 1);
+  assert.equal(s.total, c.sum * 100); assert.equal(s.apr, c.apr * 100); assert.equal(s.days, c.days);
+  assert.ok(Math.abs(s.total - 0.05) < 1e-12);
+  assert.ok(Math.abs(s.days - 2 / 3) < 1e-15);                  // 観測できた 2 回 × 8h(欠測の 8h は入れない)
+  assert.ok(Math.abs(s.apr - 0.05 * 365 / (2 / 3)) < 1e-9);
+  assert.equal(s.partial, false);                              // 30 日前の支払いがあるので「期間分ある」
+  assert.equal(s.pays.length, 3);
   assert.ok(Math.abs(s.maxApr - 0.1 * 1095) < 1e-9);          // 8h → ×1095
   assert.equal(s.neg_share, 50);
+  const none = L.summarizePayments(pays, 28800, now - 100 * L.DAY, 7);
+  assert.equal(none.cum, null); assert.equal(none.total, null); assert.equal(none.count, 0);
 });
-test("windowRange / presetLabel", () => {
-  assert.deepEqual(L.windowRange("7", T0, T0 - 100 * L.DAY), [T0 - 7 * L.DAY, T0]);
-  assert.deepEqual(L.windowRange("all", T0, T0 - 100 * L.DAY), [T0 - 100 * L.DAY, T0]);
+test("presetDays / presetLabel / windowPays", () => {
+  assert.equal(L.presetDays("7"), 7); assert.equal(L.presetDays("365"), 365); assert.equal(L.presetDays("all"), null); assert.equal(L.presetDays("x"), null);
   assert.equal(L.presetLabel("365"), "1年"); assert.equal(L.presetLabel("bogus"), "90日");
+  const pays = [{t: T0 - 7 * L.DAY}, {t: T0 - 7 * L.DAY + 1}, {t: T0}, {t: T0 + 1}];
+  assert.deepEqual(L.windowPays(pays, T0, 7).map(p => p.t), [T0 - 7 * L.DAY + 1, T0]);
+  assert.deepEqual(L.windowPays(pays, T0, null).map(p => p.t), [T0 - 7 * L.DAY, T0 - 7 * L.DAY + 1, T0]);
+});
+test("expandCum: summary.json の 6 要素の配列を展開(旧形式も)", () => {
+  assert.deepEqual(L.expandCum([0.0003, 0.1095, 1, "2026-10-25", 1.0, 2]), {sum: 0.0003, apr: 0.1095, partial: true, start: "2026-10-25", days: 1.0, n_missing: 2});
+  assert.deepEqual(L.expandCum([0.0003, 0.1095, 0, "2026-10-25", 6.67]), {sum: 0.0003, apr: 0.1095, partial: false, start: "2026-10-25", days: 6.67, n_missing: 0});
+  assert.deepEqual(L.expandCum({sum: 1, apr: 2, partial: 0, start: "s", days: 3}), {sum: 1, apr: 2, partial: false, start: "s", days: 3, n_missing: 0});
+  assert.equal(L.expandCum(null), null); assert.equal(L.expandCum(undefined), null);
+});
+test("cumNote / fmtDays: ※ の説明(期間分ない・欠測・両方)", () => {
+  assert.equal(L.fmtDays(6.6667), "6.7"); assert.equal(L.fmtDays(7), "7"); assert.equal(L.fmtDays(29.96), "30"); assert.equal(L.fmtDays(0.333), "0.3"); assert.equal(L.fmtDays(null), "?");
+  assert.equal(L.cumNote({partial: false, n_missing: 0, start: "2026-10-25", days: 7}), null);
+  assert.equal(L.cumNote({partial: true, n_missing: 0, start: "2026-10-25", days: 6.33}), "2026-10-25 開始(観測 6.3 日分)");
+  assert.equal(L.cumNote({partial: false, n_missing: 3, start: "2026-10-01", days: 29}), "欠測 3 回は加えず、観測できた 29 日分で年率換算");
+  assert.equal(L.cumNote({partial: true, n_missing: 2, start: "2026-10-25", days: 5.67}),
+               "2026-10-25 開始(観測 5.7 日分)。欠測 2 回は加えず、観測できた 5.7 日分で年率換算");
+  assert.equal(L.cumNote({partial: true, n_missing: 2, start: "2026-10-25", days: 5.67}, false), "欠測 2 回は加えず、観測できた 5.7 日分で年率換算");
+  assert.equal(L.cumNote({partial: true, n_missing: 0, start: "x", days: 1}, false), null);
+  assert.equal(L.cumNote(null), null);
 });
 test("表示用の文字列", () => {
   assert.equal(L.pct(1.234), "+1.23%"); assert.equal(L.pct(-0.5, 1), "-0.5%"); assert.equal(L.pct(null), "—"); assert.equal(L.pct(NaN), "—");
