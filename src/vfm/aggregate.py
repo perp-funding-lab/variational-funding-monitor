@@ -87,10 +87,12 @@ def agg_payments(payments, f: str) -> list[dict]:
     raw は 1 回の支払いが 1 本。欠測は y = None(0 にしない)。区間に推定が 1 つでもあれば est。
     D/W/M は最初と最後の区間の間を埋め、支払いのない区間は y = None。"""
     rows = sorted((_norm(p) for p in payments), key=lambda p: p[0])
+    if f != "raw" and f not in BUCKET:
+        f = "D"   # 知らない指定は日ごと(区切りと進め方を揃える。JS の aggPayments と同じ)
     if f == "raw":
         return [{"x": t * 1000, "y": None if r is None else r * 100, "est": s == "e" and r is not None,
                  "n": 0 if r is None else 1, "miss": 1 if r is None else 0} for t, r, s, _ in rows]
-    bucket = BUCKET.get(f, day_start)
+    bucket = BUCKET[f]
     m: dict[int, dict] = {}
     for t, r, s, _ in rows:
         k = bucket(t * 1000)

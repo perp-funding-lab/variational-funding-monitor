@@ -481,3 +481,61 @@ def test_build_monthly_empty_without_funding(tmp_path):
     build(root, tmp_path / "site", now=NOW)
     m = _read(tmp_path / "site", "monthly.json")
     assert m["months"] == [] and m["rows"] == {}
+
+
+# ---------------------------------------------------------------- 銘柄別ファイルの支払間隔(4 つ目)、直近の支払いが欠測のとき
+
+def _add(root, rows, perps):
+    append_csv(root / "data" / "funding" / "2026-10.csv", FUNDING_HEADER, rows)
+    cache = json.loads((root / ".cache" / "latest_stats.json").read_text())
+    cache["perps"].extend(perps)
+    save_json(root / ".cache" / "latest_stats.json", cache, compact=True)
+
+
+def test_build_ticker_payments_carry_their_interval_only_when_it_differs_from_the_current_one(tmp_path):
+    root = _project(tmp_path)
+    IV4 = 14400
+    old = [_fund_row(T0 - 48 * 3600, "XAG-PERP", "0.0002"), _fund_row(T0 - 40 * 3600, "XAG-PERP", None, "missing"),
+           _fund_row(T0 - 32 * 3600, "XAG-PERP", "0.0002")]                                   # 8h(間隔の変更前)
+    new = [_fund_row(T0 - k * IV4, "XAG-PERP", None if k == 3 else "0.00005", "missing" if k == 3 else "estimated", iv=IV4)
+           for k in range(7, -1, -1)]                                                          # 4h(今の間隔)
+    _add(root, old + new, [_cache_perp("XAG-PERP", "Silver", "1", "1", rate="0.00005", iv=IV4)])
+    out = tmp_path / "site"
+    build(root, out, now=NOW)
+    t = json.loads((out / "data" / "tickers" / "XAG-PERP.json").read_text())
+    assert t["interval"] == IV4
+    assert t["payments"][:3] == [[T0 - 48 * 3600, 0.0002, "e", IV], [T0 - 40 * 3600, None, "m", IV], [T0 - 32 * 3600, 0.0002, "e", IV]]
+    assert all(len(p) == 3 for p in t["payments"][3:])                                       # 今の間隔の支払いには付けない
+    assert [p[2] for p in t["payments"][3:]] == ["e"] * 4 + ["m"] + ["e"] * 3
+    row = next(r for r in _read(out, "summary.json")["rows"] if r["ticker"] == "XAG-PERP")
+    assert row["interval"] == IV4 and row["n_pay"] == 9 and row["n_missing"] == 2
+    # 全期間の観測できた日数 = 8h × 2 + 4h × 7(欠測は入れない)、年率はそれで割る
+    s_all = row["cum"]["all"]
+    assert s_all[4] == round((2 * IV + 7 * IV4) / 86400, 2) and s_all[5] == 2
+    assert s_all[1] == pytest.approx((2 * 0.0002 + 7 * 0.00005) * 365 / ((2 * IV + 7 * IV4) / 86400), rel=1e-5)
+    assert row["last_apr"] == pytest.approx(annualize(0.00005, IV4), rel=1e-5)
+
+
+def test_build_last_status_describes_the_newest_row_even_when_it_is_missing(tmp_path):
+    root = _project(tmp_path)
+    rows = [_fund_row(T0 - 2 * IV, "SOL-PERP", "0.0003"), _fund_row(T0 - IV, "SOL-PERP", "0.0004", "confirmed"),
+            _fund_row(T0, "SOL-PERP", None, "missing")]
+    _add(root, rows, [_cache_perp("SOL-PERP", "Solana", "1", "1", rate="0.0002")])
+    build(root, tmp_path / "site", now=NOW)
+    row = next(r for r in _read(tmp_path / "site", "summary.json")["rows"] if r["ticker"] == "SOL-PERP")
+    assert (row["last_status"], row["last_pay_ts"]) == ("missing", T0)
+    assert row["last_rate"] is None and row["last_apr"] is None                               # 古い支払いを「直近」と見せない
+    assert row["n_pay"] == 2 and row["n_missing"] == 1 and row["cur_rate"] == 0.0002
+
+
+def test_build_last_apr_uses_the_newest_payments_own_interval(tmp_path):
+    root = _project(tmp_path)
+    rows = [_fund_row(T0 - IV, "WIF-PERP", "0.0002", "confirmed"), _fund_row(T0, "WIF-PERP", "0.0003", "confirmed")]   # 8h の支払い
+    _add(root, rows, [_cache_perp("WIF-PERP", "dogwifhat", "1", "1", rate="0.00005", iv=14400)])                     # 今は 4h
+    out = tmp_path / "site"
+    build(root, out, now=NOW)
+    row = next(r for r in _read(out, "summary.json")["rows"] if r["ticker"] == "WIF-PERP")
+    assert (row["last_status"], row["last_pay_ts"], row["last_rate"]) == ("confirmed", T0, 0.0003)
+    assert row["last_apr"] == pytest.approx(annualize(0.0003, IV), rel=1e-5)                 # × 1095(× 2190 ではない)
+    assert row["cur_apr"] == pytest.approx(annualize(0.00005, 14400), rel=1e-5)
+    assert json.loads((out / "data" / "tickers" / "WIF-PERP.json").read_text())["payments"] == [[T0 - IV, 0.0002, "c", IV], [T0, 0.0003, "c", IV]]

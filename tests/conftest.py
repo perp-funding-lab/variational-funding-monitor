@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from vfm.funding import KIND_CHANGE, KIND_FIRST, process_run
+from vfm.funding import KIND_CHANGE, KIND_FIRST, ST_MISSING, process_run, rebuild_from_obs
 from vfm.model import Perp, Stats, parse_stats
+from vfm.timeutil import fmt_iso, from_unix, parse_iso, to_unix
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "stats_sample.json"
 MIN_LISTINGS = 50          # model.parse_stats が要求する最小件数(これ未満は SchemaError)
@@ -157,6 +158,66 @@ class Simulator:
         self.prev_fetch_ts = fetch_ts
         self.results.append(res)
         return res
+
+
+# ---------------------------------------------------------------- 窓のシナリオを短く書く道具(時刻は 2026-10-24 UTC 基準)
+
+H = 3600
+DAY = 1792800000                     # 2026-10-24T00:00:00Z
+
+
+def at(hm: str, day: int = 0) -> str:
+    """'HH:MM' または 'HH:MM:SS'(2026-10-24 + day 日)→ ISO。"""
+    h, m, *s = (int(x) for x in hm.split(":"))
+    return fmt_iso(from_unix(DAY + day * 86400 + h * H + m * 60 + (s[0] if s else 0)))
+
+
+def hm(ts: int) -> str:
+    """unix 秒 → 'HH:MM'(2026-10-24 以外は '+1d' などを付ける)。"""
+    d, rest = divmod(ts - DAY, 86400)
+    s = f"{rest // H:02d}:{rest % H // 60:02d}"
+    return s if d == 0 else f"{s}{d:+d}d"
+
+
+def sample(iv_h: float, nt_h: float, rate: str | None = "0.00011", ticker: str = "X-PERP") -> Perp:
+    """1 銘柄の標本。間隔 iv_h 時間、next_timestamp = 2026-10-24T00:00 + nt_h 時間。rate=None は funding.last が null。"""
+    return Perp(ticker, ticker, "1", "1", "1", "1", "1", int(iv_h * H), DAY + int(nt_h * H), rate, None)
+
+
+def play(mode: str, steps) -> Simulator:
+    """steps: [(時刻 'HH:MM', day, 標本 / 標本の list / None)] を順に process_run に通した Simulator。"""
+    sim = Simulator(mode)
+    for hm_, day, perps in steps:
+        perps = [] if perps is None else (perps if isinstance(perps, list) else [perps])
+        sim.run(perps, at(hm_, day))
+    return sim
+
+
+def pay_rows(sim: Simulator, ticker: str = "X-PERP") -> list[tuple]:
+    """(支払時刻, 状態の頭文字, 間隔(時間), rate, 根拠の時刻) を pay_ts 順に。"""
+    out = []
+    for r in sorted(sim.funding_rows, key=lambda r: r["pay_ts"]):
+        if r["ticker"] == ticker:
+            basis = hm(to_unix(parse_iso(r["basis_obs_ts"]))) if r["basis_obs_ts"] else None
+            out.append((hm(r["pay_ts"]), r["status"][0], r["interval_seconds"] // H, r["interval_rate"], basis))
+    return out
+
+
+def full_row(r: dict) -> tuple:
+    return (int(r["pay_ts"]), r["ticker"], int(r["interval_seconds"]), r["interval_rate"], r["annualized_rate"],
+            r["status"], r["basis_obs_ts"])
+
+
+def assert_rebuild_matches_live(sim: Simulator) -> None:
+    """観測ログからの作り直しが本番と全列一致、(銘柄, pay_ts) の重複なし、missing は rate なし(0 にもしない)。"""
+    assert sorted(map(full_row, rebuild_from_obs(sim.obs_rows, sim.mode))) == sorted(map(full_row, sim.funding_rows))
+    keys = [(r["ticker"], r["pay_ts"]) for r in sim.funding_rows]
+    assert len(keys) == len(set(keys))
+    for r in sim.funding_rows:
+        if r["status"] == ST_MISSING:
+            assert r["interval_rate"] is None and r["annualized_rate"] is None and r["basis_obs_ts"] is None
+        else:
+            assert r["interval_rate"] is not None
 
 
 @pytest.fixture

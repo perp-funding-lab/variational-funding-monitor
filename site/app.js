@@ -28,7 +28,10 @@ function save() { try { localStorage.setItem("vfm-state", JSON.stringify(state))
 
 // ───────── データ ─────────
 let SUMMARY = null, SWAPS = null, ROWS = [];
-let MONTHLY = null;   // data/monthly.json(月ごとの累積。無ければ銘柄別ファイルから計算)
+let MONTHLY = null;          // data/monthly.json(月ごとの累積)。ヒートマップの欄が画面に近づいたときに 1 回だけ読む
+let monthlyLoad = null;      // その Promise(読めなければ MONTHLY は null のままで、銘柄別ファイルから計算する)
+let monthlyFailed = false;
+let heatArmed = false;       // ヒートマップの欄が画面に近づいた。それまでは monthly.json も銘柄別ファイルも読まない(初回の読み込みを小さく)
 let END_MS = Date.now();        // 期間の終わり(summary.generated)
 let REF_MS = Date.now();        // 「停止?」の基準(summary.last_success)
 const BY_TICKER = new Map();
@@ -293,6 +296,12 @@ async function renderHeat() {
   note.textContent = `絞り込み後の銘柄のうち OI 上位 ${list.length} 銘柄${all.length > list.length ? `(${all.length} 銘柄中。上限 ${HEAT_MAX})` : ""}。値は月ごとの累積 FR(%)、直近 ${HEAT_MONTHS} か月。欠測は加えない。`;
   if (!list.length) { showEmpty(el, "表示する銘柄がありません。"); return; }
   const req = ++heatReq;
+  if (!heatArmed) { el.style.height = ""; showEmpty(el, "読み込み中…"); return; }   // 画面に近づくまで待つ(watchHeat)
+  if (!MONTHLY && !monthlyFailed) {
+    if (!el.querySelector(".plot-container")) { el.style.height = ""; showEmpty(el, "読み込み中…"); }
+    await monthlyLoad;
+    if (req !== heatReq) return;
+  }
   const rows = [], pn = [], per = new Set(); let failed = 0;
   if (MONTHLY && MONTHLY.rows) {
     // 月ごとの合計は build が data/monthly.json にまとめている(銘柄別ファイルを 60 個読まない)
@@ -312,6 +321,7 @@ async function renderHeat() {
       const m = monthlyCum(res[i].payments); rows.push(r); pn.push(m);
       for (const k of m.keys()) per.add(k);
     });
+    if (monthlyFailed) note.textContent += " data/monthly.json を読み込めなかったので、銘柄別の詳細データから計算した。";
     if (failed) note.textContent += ` ${failed} 銘柄は詳細データ(data/tickers/)を読み込めなかったので省いた。`;
   }
   if (!rows.length) { showEmpty(el, "詳細データを読み込めませんでした。", true); return; }
@@ -324,6 +334,21 @@ async function renderHeat() {
     textfont: {size: 11}, hovertemplate: "%{y} %{x}<br>累積FR %{z:.3f}%<extra></extra>", colorbar: {title: {text: "累積FR(%)"}, thickness: 12}}],
     {...LAYOUT, hovermode: "closest", margin: {l: 110, r: 10, t: 56, b: 70}, title: title(`<b>月ごとの累積FR</b>(%。直近 ${HEAT_MONTHS} か月、OI 上位 ${rows.length} 銘柄)`),
      xaxis: {type: "category", tickangle: -45, ...AXIS}, yaxis: {type: "category", autorange: "reversed", ...AXIS}});
+}
+
+/* ヒートマップの欄が画面に近づいたら(rootMargin 400px)monthly.json を読んで描く。IntersectionObserver が無ければ最初の描画の後に読む */
+function armHeat() {
+  if (heatArmed) return;
+  heatArmed = true;
+  monthlyLoad = fetchJson("data/monthly.json").then(j => {
+    if (j && j.rows && typeof j.rows === "object") MONTHLY = j; else monthlyFailed = true;
+  }, () => { monthlyFailed = true; });
+  renderHeat();
+}
+function watchHeat() {
+  if (typeof IntersectionObserver === "undefined") { setTimeout(armHeat, 0); return; }
+  const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); armHeat(); } }, {rootMargin: "400px 0px"});
+  io.observe($("heat"));
 }
 
 // ───────── swap ─────────
@@ -373,8 +398,7 @@ window.addEventListener("hashchange", () => showTab(location.hash === "#swap" ? 
 async function main() {
   showTab(location.hash === "#swap" ? "swap" : "perp");
   if (!hasPlotly()) notice("al-plotly", "チャートのライブラリ(Plotly)を読み込めませんでした。表は表示できますがチャートは出ません。", "err");
-  const [sum, sw, mo] = await Promise.allSettled([fetchJson("data/summary.json"), fetchJson("data/swaps.json"), fetchJson("data/monthly.json")]);
-  if (mo.status === "fulfilled" && mo.value && mo.value.rows) MONTHLY = mo.value;
+  const [sum, sw] = await Promise.allSettled([fetchJson("data/summary.json"), fetchJson("data/swaps.json")]);
   if (sum.status === "fulfilled" && sum.value && Array.isArray(sum.value.rows)) {
     SUMMARY = sum.value;
     ROWS = SUMMARY.rows.filter(r => r && typeof r.ticker === "string");
@@ -385,7 +409,7 @@ async function main() {
     END_MS = Number.isFinite(g) ? g : Date.now();
     REF_MS = Number.isFinite(ls) ? ls : END_MS;
     if (!BY_TICKER.has(state.ticker)) state.ticker = ROWS.length ? sortRows(ROWS, PERP_COLS, "oi", true)[0].ticker : null;
-    renderHero(); renderControls(); renderTable(); renderDetail(); renderHeat();
+    renderHero(); renderControls(); renderTable(); renderDetail(); renderHeat(); watchHeat();
     setInterval(checkStale, 60000);
   } else {
     const why = sum.status === "rejected" ? (sum.reason && sum.reason.message) || String(sum.reason) : "rows がありません";

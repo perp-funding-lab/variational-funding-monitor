@@ -123,13 +123,8 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
     result = process_run(stats.perps, fetch_ts, prev_obs, prev_changes, meta.get("last_success_ts"), last_pay, mode, prev_first,
                          absent_prev=meta.get("absent") or [], prev_first_iv=prev_first_iv)
 
-    # 観測ログ: 行ごとの obs_ts の日付のファイルへ(L 行は前回の取得時刻なので前日のことがある)
-    by_day: dict[str, list[dict]] = {}
-    for r in result.obs_rows:
-        by_day.setdefault(r["obs_ts"][:10], []).append(r)
-    n_obs = 0
-    for day, rows in sorted(by_day.items()):
-        n_obs += append_csv(paths.obs_dir / f"{day}.csv", OBS_HEADER, rows)
+    # 確定 FR を先に書く: 途中で失敗しても「観測ログだけ進んで確定 FR が抜ける」状態にならない
+    # (確定 FR だけ書けて観測ログが書けなかった場合は、次の回が同じ窓の切り替えをやり直し、記録済みの支払は重ねない)
     # 確定 FR: pay_ts の月のファイルへ
     by_month: dict[str, list[dict]] = {}
     for r in result.funding_rows:
@@ -140,6 +135,13 @@ def run_once(data_root: Path, settings: dict, *, now: _dt.datetime | None = None
         rows.sort(key=lambda r: (r["pay_ts"], r["ticker"]))
         n_fund += append_csv(paths.funding_dir / f"{m}.csv", FUNDING_HEADER, rows)
 
+    # 観測ログ: 行ごとの obs_ts の日付のファイルへ(L 行は前回の取得時刻なので前日のことがある)
+    by_day: dict[str, list[dict]] = {}
+    for r in result.obs_rows:
+        by_day.setdefault(r["obs_ts"][:10], []).append(r)
+    n_obs = 0
+    for day, rows in sorted(by_day.items()):
+        n_obs += append_csv(paths.obs_dir / f"{day}.csv", OBS_HEADER, rows)
     # 毎時スナップショット: この UTC 時で最初の成功なら書く
     last_ok = meta.get("last_success_ts")
     first_in_hour = last_ok is None or floor_hour(parse_iso(last_ok)) < floor_hour(fetch_ts_dt)

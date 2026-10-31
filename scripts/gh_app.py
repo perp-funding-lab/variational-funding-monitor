@@ -14,6 +14,7 @@ App ID・installation ID・bot の ID は秘密ではないので config/github_
   python3 scripts/gh_app.py pages              # GitHub Pages を Actions デプロイで有効にする
   python3 scripts/gh_app.py dispatch collect.yml [--input scheduled=]
   python3 scripts/gh_app.py runs [--limit 10]
+  python3 scripts/gh_app.py gh run list -R perp-funding-lab/variational-funding-monitor   # gh を App の読み取り専用トークンで
   python3 scripts/gh_app.py pkcs8 | npx wrangler@4 secret put GITHUB_APP_PRIVATE_KEY   # パイプ専用(端末には出さない)
 """
 from __future__ import annotations
@@ -468,6 +469,16 @@ def cmd_runs(args) -> int:
     return 0
 
 
+def cmd_gh(args) -> int:
+    """gh CLI を App の読み取り専用トークンで動かす(例: gh_app.py gh run list -R perp-funding-lab/variational-funding-monitor)。
+    本人のアカウントの gh ログインは使わない。トークンは環境変数 GH_TOKEN でだけ渡す。"""
+    cfg = load_cfg()
+    tok = installation_token(cfg, repositories=[REPO], permissions={"actions": "read", "contents": "read", "metadata": "read"})["token"]
+    env = dict(os.environ, GH_TOKEN=tok, GH_HOST="github.com")
+    env.pop("GITHUB_TOKEN", None)
+    return subprocess.run(["gh", *args.gh_args], env=env).returncode
+
+
 def cmd_pkcs8(args) -> int:
     if sys.stdout.isatty():
         print("パイプ専用です(例: python3 scripts/gh_app.py pkcs8 | npx wrangler@4 secret put GITHUB_APP_PRIVATE_KEY)", file=sys.stderr)
@@ -508,9 +519,13 @@ def main(argv=None) -> int:
     r.add_argument("--limit", type=int, default=10)
     r.set_defaults(fn=cmd_runs)
     sub.add_parser("pkcs8").set_defaults(fn=cmd_pkcs8)
+    gp = sub.add_parser("gh", help="gh CLI を App の読み取り専用トークンで動かす")
+    gp.add_argument("gh_args", nargs=argparse.REMAINDER)
+    gp.set_defaults(fn=cmd_gh)
     args = ap.parse_args(argv)
-    if getattr(args, "git_args", None) and args.git_args[:1] == ["--"]:
-        args.git_args = args.git_args[1:]
+    for k in ("git_args", "gh_args"):
+        if getattr(args, k, None) and getattr(args, k)[:1] == ["--"]:
+            setattr(args, k, getattr(args, k)[1:])
     return args.fn(args)
 
 

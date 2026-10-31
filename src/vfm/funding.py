@@ -186,11 +186,7 @@ def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: d
             if seen_prev and prev_fetch_ts and prev_fetch_ts > prev["obs_ts"]:
                 r.obs_rows.append(_obs(prev_fetch_ts, t, piv, pnt, prate, pann, KIND_LAST))
             r.obs_rows.append(_obs(fetch_ts, t, iv, nt, rate, ann, KIND_FIRST))
-            if mode == MODE_CONFIRMED:
-                pay, lp = nt - iv, last_pay.get(t)
-                if lp is None or pay > lp:
-                    r.funding_rows.extend(missing_rows(t, lp, pay, iv))
-                    r.funding_rows.append(_fund(pay, t, iv, rate, ann, ST_CONFIRMED, fetch_ts))
+            # 新しい窓の開始(nt − iv)は、旧方式では支払時刻ではない(または既に記録済み)ので、どちらの方式でも行は作らない
             continue
         if nt < pnt or fetch_unix < pnt - CLOCK_SKEW_SECONDS:
             # 時刻が戻った、または旧窓の支払時刻より前に同じ間隔のまま窓が動いた(API の一時的な不整合)。
@@ -210,7 +206,9 @@ def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: d
         if mode == MODE_ESTIMATED:
             # pay_ts = pnt の推定値 = 旧窓で最後に見た値。旧窓の中で一度も観測できていなければ欠測
             last_seen_unix = to_unix(parse_iso(last_seen))
-            r.funding_rows.extend(missing_rows(t, lp, pnt, piv_first))
+            # 欠測で埋めるのは閉じる窓の開始より後だけ(間隔の変更で途中から始まった窓の前に、新しい間隔の支払時刻を作らない)
+            floor = None if lp is None else max(lp, pnt - piv_first)
+            r.funding_rows.extend(missing_rows(t, floor, pnt, piv_first))
             if lp is None or pnt > lp:
                 if is_fresh(last_seen_unix, pnt, piv_first):
                     r.funding_rows.append(_fund(pnt, t, piv, prate, pann, ST_ESTIMATED, last_seen))
@@ -228,8 +226,10 @@ def process_run(perps, fetch_ts: str, prev_obs: dict[str, dict], prev_changes: d
             # pnt と nt − iv の間に観測の無い窓があれば欠測(既に記録した支払より前には作らない)
             r.funding_rows.extend(missing_rows(t, max(pnt, lp) if lp is not None else pnt, nt, iv))
         else:
-            pay = nt - iv
-            r.funding_rows.extend(gap_rows_confirmed(t, lp, pnt, piv_first, pay, iv))
+            # 直近の支払時刻 = 旧窓の支払時刻と新しい窓の開始の遅い方(境目で 4h→8h になると nt − iv は旧窓の支払時刻より前になる)
+            pay = max(pnt, nt - iv)
+            floor = None if lp is None else max(lp, pnt - piv_first)
+            r.funding_rows.extend(gap_rows_confirmed(t, floor, pnt, piv_first, pay, iv))
             if lp is None or pay > lp:
                 # 旧窓の支払時刻の確定値なら旧窓の(最後に観測した)間隔で記録する(境目で 8h→4h になっても年率が 2 倍にならない)
                 r.funding_rows.append(_fund(pay, t, piv if pay == pnt else iv, rate, ann, ST_CONFIRMED, fetch_ts))
@@ -286,15 +286,16 @@ def rebuild_from_obs(obs_rows: list[dict], mode: str) -> list[dict]:
         last_pay: int | None = None
         for i, w in enumerate(windows):
             if mode == MODE_CONFIRMED:
-                pay = w["nt"] - w["first_iv"]
-                rec_iv = w["first_iv"]
-                if i > 0 and not w["reanchored"]:
+                if w["reanchored"]:
+                    continue   # 間隔の変更で途中から始まった窓の開始は支払時刻ではない(または記録済み)
+                if i == 0:
+                    pay, rec_iv = w["nt"] - w["first_iv"], w["first_iv"]
+                else:
                     pw = windows[i - 1]
-                    out.extend(gap_rows_confirmed(t, last_pay, pw["nt"], pw["first_iv"], pay, w["first_iv"]))
-                    if pay == pw["nt"]:
-                        rec_iv = pw["last_iv"]
-                elif last_pay is None or pay > last_pay:
-                    out.extend(missing_rows(t, last_pay, pay, w["first_iv"]))
+                    pay = max(pw["nt"], w["nt"] - w["first_iv"])
+                    floor = None if last_pay is None else max(last_pay, pw["nt"] - pw["first_iv"])
+                    out.extend(gap_rows_confirmed(t, floor, pw["nt"], pw["first_iv"], pay, w["first_iv"]))
+                    rec_iv = pw["last_iv"] if pay == pw["nt"] else w["first_iv"]
                 if last_pay is None or pay > last_pay:
                     out.append(_fund(pay, t, rec_iv, w["first_rate"], w["first_ann"], ST_CONFIRMED, w["first_ts"]))
                     last_pay = pay
@@ -304,7 +305,8 @@ def rebuild_from_obs(obs_rows: list[dict], mode: str) -> list[dict]:
             if w["abandoned"]:
                 continue   # 間隔の変更で打ち切られた窓は支払われない
             nxt, pay = windows[i + 1], w["nt"]
-            out.extend(missing_rows(t, last_pay, pay, w["first_iv"]))
+            floor = None if last_pay is None else max(last_pay, w["nt"] - w["first_iv"])
+            out.extend(missing_rows(t, floor, pay, w["first_iv"]))
             if last_pay is None or pay > last_pay:
                 if is_fresh(to_unix(parse_iso(w["last_ts"])), pay, w["first_iv"]):
                     out.append(_fund(pay, t, w["last_iv"], w["last_rate"], w["last_ann"], ST_ESTIMATED, w["last_ts"]))

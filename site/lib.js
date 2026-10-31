@@ -100,7 +100,8 @@
      D/W/M は最初と最後の区間の間を埋め、支払いのない区間は y = null。 */
   function aggPayments(pays, f) {
     if (f === "raw") return pays.map(p => ({x: p.t, y: p.r == null ? null : p.r * 100, est: p.s === "e" && p.r != null, n: p.r == null ? 0 : 1, miss: p.r == null ? 1 : 0}));
-    const bucket = bucketOf[f] || dayStart, m = new Map();
+    if (!bucketOf[f]) f = "D";   // 知らない指定は日ごと(区切りと進め方を揃える。Python の agg_payments と同じ)
+    const bucket = bucketOf[f], m = new Map();
     for (const p of pays) {
       const k = bucket(p.t);
       let a = m.get(k); if (!a) { a = {x: k, y: null, est: false, n: 0, miss: 0}; m.set(k, a); }

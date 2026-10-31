@@ -166,11 +166,13 @@ def test_estimated_does_not_rewrite_pay_ts_already_recorded():
     assert kinds(r.obs_rows) == [KIND_FIRST]      # prev_fetch_ts == obs_ts なので L 行は無い
 
 
-def test_estimated_fills_gap_before_old_window_from_last_pay():
-    # 最後に記録した pay_ts が 2 窓前なら、その間も missing で埋める
+def test_estimated_does_not_fill_before_the_closing_window_start():
+    # 空白は窓が開くとき(前の窓の切り替え)に埋める。閉じるときに見るのは窓の中(開始〜支払時刻)だけで、
+    # 最後に記録した支払が窓の開始より前でも、窓の前には欠測を足さない(間隔の変更で途中から始まった窓の前に、
+    # 新しい間隔の実在しない支払時刻を作らないため)。通常の運用では、窓が閉じるとき最後の支払は窓の開始と同じ
     prev = obs_row(RUN2, "BTC-PERP", IV8, T0, "0.0001")
     r = process_run([perp("BTC-PERP", IV8, T0 + IV8)], RUN3, {"BTC-PERP": prev}, {}, RUN2, {"BTC-PERP": T0 - 3 * IV8}, ST_ESTIMATED)
-    assert [(x["pay_ts"], x["status"]) for x in r.funding_rows] == [(T0 - 2 * IV8, ST_MISSING), (T0 - IV8, ST_MISSING), (T0, ST_ESTIMATED)]
+    assert [(x["pay_ts"], x["status"]) for x in r.funding_rows] == [(T0, ST_ESTIMATED)]
 
 
 # ---------------------------------------------------------------- confirmed
@@ -662,11 +664,13 @@ def test_interval_shortening_across_rollover_estimated():
     assert {_key(x) for x in rebuild_from_obs(sim.obs_rows, ST_ESTIMATED)} == {_key(x) for x in sim.funding_rows}
 
 
-def test_interval_lengthening_whose_pay_goes_back_records_nothing_confirmed():
+def test_interval_lengthening_at_the_boundary_records_the_old_window_payment_confirmed():
     sim = Simulator(ST_CONFIRMED)
     sim.run([perp("X-PERP", IV4, T0, "0.00005")], RUN1)                                      # confirmed T0 − 4h
-    r = sim.run([perp("X-PERP", IV8, T0 + IV4, "0.0001")], RUN3)                             # 4h → 8h: pay = T0 − 4h(既に記録済み)
-    assert r.funding_rows == [] and kinds(r.obs_rows) == [KIND_FIRST]
+    r = sim.run([perp("X-PERP", IV8, T0 + IV4, "0.0001")], RUN3)                             # 境目の後に 4h → 8h
+    # 新しい窓の開始(nt − iv = T0 − 4h)は記録済みだが、旧 4h 窓の支払時刻 T0 の確定値はまだ: 旧窓の間隔(4h)で記録する
+    assert [(x["pay_ts"], x["status"], x["interval_seconds"], x["interval_rate"]) for x in r.funding_rows] == [(T0, ST_CONFIRMED, IV4, "0.0001")]
+    assert kinds(r.obs_rows) == [KIND_FIRST]
     assert {_key(x) for x in rebuild_from_obs(sim.obs_rows, ST_CONFIRMED)} == {_key(x) for x in sim.funding_rows}
 
 
