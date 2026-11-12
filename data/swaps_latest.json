@@ -3,24 +3,24 @@
   {
    "interval_seconds": 86400,
    "last": {
-    "annualized_long_rate": "-0.1629",
-    "annualized_short_rate": "-0.1629",
-    "interval_long_rate": "-0.0004526",
-    "interval_short_rate": "-0.0004526"
+    "annualized_long_rate": "0.04880",
+    "annualized_short_rate": "0.02880",
+    "interval_long_rate": "0.0001356",
+    "interval_short_rate": "0.00008000"
    },
-   "long_oi": "124695.2821410000000000",
-   "mark_price": "2.5737",
-   "name": "Swap on Gasoline",
+   "long_oi": "3637501.56860739000000",
+   "mark_price": "12978.49",
+   "name": "Swap on China Index",
    "next": {
-    "annualized_long_rate": "-0.1444",
-    "annualized_short_rate": "-0.1444",
-    "interval_long_rate": "-0.0004010",
-    "interval_short_rate": "-0.0004010"
+    "annualized_long_rate": "0.04880",
+    "annualized_short_rate": "0.02880",
+    "interval_long_rate": "0.0001356",
+    "interval_short_rate": "0.00008000"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "142929.1950570000000000",
-   "ticker": "GASOL-SWAP",
-   "volume_24h": "2367616.009240"
+   "short_oi": "193064.30142054000000",
+   "ticker": "CNA50-SWAP",
+   "volume_24h": "8024533.417741"
   },
   {
    "interval_seconds": 86400,
@@ -30,9 +30,9 @@
     "interval_long_rate": "0.0001356",
     "interval_short_rate": "0.00008000"
    },
-   "long_oi": "998517.42888040000000",
-   "mark_price": "2843.87",
-   "name": "Swap on US2K Spot",
+   "long_oi": "21401377.28940960000000",
+   "mark_price": "7581.95",
+   "name": "Swap on US 500",
    "next": {
     "annualized_long_rate": "0.04880",
     "annualized_short_rate": "0.02880",
@@ -40,9 +40,31 @@
     "interval_short_rate": "0.00008000"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "998464.21502100000000",
-   "ticker": "US2K-SWAP",
-   "volume_24h": "22841100.800895"
+   "short_oi": "10713710.59004400000000",
+   "ticker": "US500-SWAP",
+   "volume_24h": "215737589.380576"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "0.1675",
+    "annualized_short_rate": "0.07255",
+    "interval_long_rate": "0.0004652",
+    "interval_short_rate": "0.0002015"
+   },
+   "long_oi": "31814629.50482280000000",
+   "mark_price": "3936.81",
+   "name": "Swap on Gold Spot",
+   "next": {
+    "annualized_long_rate": "0.05612",
+    "annualized_short_rate": "0.02356",
+    "interval_long_rate": "0.0001559",
+    "interval_short_rate": "0.00006544"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "8708097.92169960000000",
+   "ticker": "XAU-SWAP",
+   "volume_24h": "123716308.972909"
   },
   {
    "interval_seconds": 86400,
@@ -52,9 +74,9 @@
     "interval_long_rate": "0.0001356",
     "interval_short_rate": "0.00008000"
    },
-   "long_oi": "1272551.32487700000000",
-   "mark_price": "3732.51",
-   "name": "Swap on US MidCap Spot",
+   "long_oi": "2492252.0480000000000",
+   "mark_price": "3700.7",
+   "name": "Swap on Taiwan Index",
    "next": {
     "annualized_long_rate": "0.04880",
     "annualized_short_rate": "0.02880",
@@ -62,97 +84,9 @@
     "interval_short_rate": "0.00008000"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "1238671.42579440000000",
-   "ticker": "US400-SWAP",
-   "volume_24h": "11652560.623576"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "-0.01274",
-    "annualized_short_rate": "-0.01274",
-    "interval_long_rate": "-0.00003538",
-    "interval_short_rate": "-0.00003538"
-   },
-   "long_oi": "1434911.7767400000000",
-   "mark_price": "102.61",
-   "name": "Swap on Dollar Index",
-   "next": {
-    "annualized_long_rate": "-0.01274",
-    "annualized_short_rate": "-0.01274",
-    "interval_long_rate": "-0.00003538",
-    "interval_short_rate": "-0.00003538"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "1688162.3731800000000",
-   "ticker": "DXI-SWAP",
-   "volume_24h": "21508914.962797"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "-0.2556",
-    "annualized_short_rate": "-0.2556",
-    "interval_long_rate": "-0.0007101",
-    "interval_short_rate": "-0.0007101"
-   },
-   "long_oi": "227081.0014920000000000",
-   "mark_price": "4.1082",
-   "name": "Swap on Heating Oil",
-   "next": {
-    "annualized_long_rate": "-0.2678",
-    "annualized_short_rate": "-0.2678",
-    "interval_long_rate": "-0.0007439",
-    "interval_short_rate": "-0.0007439"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "95065.5145260000000000",
-   "ticker": "HOIL-SWAP",
-   "volume_24h": "4101442.155652"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "0.06465",
-    "annualized_short_rate": "0.06465",
-    "interval_long_rate": "0.0001796",
-    "interval_short_rate": "0.0001796"
-   },
-   "long_oi": "2670287.746930000000000",
-   "mark_price": "6.3001",
-   "name": "Swap on Copper Spot",
-   "next": {
-    "annualized_long_rate": "0.06480",
-    "annualized_short_rate": "0.06480",
-    "interval_long_rate": "0.0001800",
-    "interval_short_rate": "0.0001800"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "377534.181550000000000",
-   "ticker": "COPP-SWAP",
-   "volume_24h": "4907215.945170"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "0.03696",
-    "annualized_short_rate": "0.03696",
-    "interval_long_rate": "0.0001027",
-    "interval_short_rate": "0.0001027"
-   },
-   "long_oi": "172641.0021840000000",
-   "mark_price": "5055.7",
-   "name": "Swap on Cocoa",
-   "next": {
-    "annualized_long_rate": "0.03734",
-    "annualized_short_rate": "0.03734",
-    "interval_long_rate": "0.0001037",
-    "interval_short_rate": "0.0001037"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "5767.8450480000000",
-   "ticker": "COCOA-SWAP",
-   "volume_24h": "339842.573170"
+   "short_oi": "2470911.6735680000000",
+   "ticker": "TWI-SWAP",
+   "volume_24h": "12268385.706705"
   },
   {
    "interval_seconds": 86400,
@@ -162,19 +96,85 @@
     "interval_long_rate": "-0.0004340",
     "interval_short_rate": "-0.0004340"
    },
-   "long_oi": "996060.655370500000000",
-   "mark_price": "84.864",
+   "long_oi": "997577.367762300000000",
+   "mark_price": "84.976",
    "name": "Swap on WTI Crude Oil",
    "next": {
-    "annualized_long_rate": "-0.1459",
-    "annualized_short_rate": "-0.1459",
-    "interval_long_rate": "-0.0004052",
-    "interval_short_rate": "-0.0004052"
+    "annualized_long_rate": "-0.1457",
+    "annualized_short_rate": "-0.1457",
+    "interval_long_rate": "-0.0004047",
+    "interval_short_rate": "-0.0004047"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "718150.790209000000000",
+   "short_oi": "718655.967338400000000",
    "ticker": "USOIL-SWAP",
-   "volume_24h": "9343966.217779"
+   "volume_24h": "9230410.250230"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "0.04880",
+    "annualized_short_rate": "0.02880",
+    "interval_long_rate": "0.0001356",
+    "interval_short_rate": "0.00008000"
+   },
+   "long_oi": "38530474.48058172000000",
+   "mark_price": "28091.63",
+   "name": "Swap on US Non-Financial 100",
+   "next": {
+    "annualized_long_rate": "0.04880",
+    "annualized_short_rate": "0.02880",
+    "interval_long_rate": "0.0001356",
+    "interval_short_rate": "0.00008000"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "24932221.36186152000000",
+   "ticker": "US100-SWAP",
+   "volume_24h": "802385952.105197"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "-0.2556",
+    "annualized_short_rate": "-0.2556",
+    "interval_long_rate": "-0.0007101",
+    "interval_short_rate": "-0.0007101"
+   },
+   "long_oi": "227186.02410599994472494000000",
+   "mark_price": "4.112",
+   "name": "Swap on Heating Oil",
+   "next": {
+    "annualized_long_rate": "-0.2675",
+    "annualized_short_rate": "-0.2675",
+    "interval_long_rate": "-0.0007432",
+    "interval_short_rate": "-0.0007432"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "95109.48134299997685957000000",
+   "ticker": "HOIL-SWAP",
+   "volume_24h": "4100569.734181"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "0.03696",
+    "annualized_short_rate": "0.03696",
+    "interval_long_rate": "0.0001027",
+    "interval_short_rate": "0.0001027"
+   },
+   "long_oi": "172945.3495690000000",
+   "mark_price": "5079.6",
+   "name": "Swap on Cocoa",
+   "next": {
+    "annualized_long_rate": "0.03717",
+    "annualized_short_rate": "0.03717",
+    "interval_long_rate": "0.0001032",
+    "interval_short_rate": "0.0001032"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "5788.9263530000000",
+   "ticker": "COCOA-SWAP",
+   "volume_24h": "339101.802120"
   },
   {
    "interval_seconds": 86400,
@@ -184,8 +184,8 @@
     "interval_long_rate": "0.0004769",
     "interval_short_rate": "0.0001912"
    },
-   "long_oi": "6930780.527090000000000",
-   "mark_price": "50.9738",
+   "long_oi": "7011804.337002000000000",
+   "mark_price": "50.8648",
    "name": "Swap on Silver Spot",
    "next": {
     "annualized_long_rate": "0.05649",
@@ -194,97 +194,9 @@
     "interval_short_rate": "0.00006466"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "3133018.826175000000000",
+   "short_oi": "3231012.013416000000000",
    "ticker": "XAG-SWAP",
-   "volume_24h": "27142160.579226"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "-0.2607",
-    "annualized_short_rate": "-0.2607",
-    "interval_long_rate": "-0.0007242",
-    "interval_short_rate": "-0.0007242"
-   },
-   "long_oi": "945591.155011800000000",
-   "mark_price": "90.841",
-   "name": "Swap on Brent Crude Oil",
-   "next": {
-    "annualized_long_rate": "-0.2402",
-    "annualized_short_rate": "-0.2402",
-    "interval_long_rate": "-0.0006671",
-    "interval_short_rate": "-0.0006671"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "1374836.007756000000000",
-   "ticker": "UKOIL-SWAP",
-   "volume_24h": "4796072.108109"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "0.04880",
-    "annualized_short_rate": "0.02880",
-    "interval_long_rate": "0.0001356",
-    "interval_short_rate": "0.00008000"
-   },
-   "long_oi": "3900682.21192793000000",
-   "mark_price": "12990.52",
-   "name": "Swap on China Index",
-   "next": {
-    "annualized_long_rate": "0.04880",
-    "annualized_short_rate": "0.02880",
-    "interval_long_rate": "0.0001356",
-    "interval_short_rate": "0.00008000"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "118146.93484731000000",
-   "ticker": "CNA50-SWAP",
-   "volume_24h": "7689994.602292"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "-0.1051",
-    "annualized_short_rate": "-0.1051",
-    "interval_long_rate": "-0.0002921",
-    "interval_short_rate": "-0.0002921"
-   },
-   "long_oi": "964072.572337000000000",
-   "mark_price": "18.64",
-   "name": "Swap on Volatility Index",
-   "next": {
-    "annualized_long_rate": "0.1724",
-    "annualized_short_rate": "0.1724",
-    "interval_long_rate": "0.0004788",
-    "interval_short_rate": "0.0004788"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "95288.299519000000000",
-   "ticker": "VXI-SWAP",
-   "volume_24h": "5074111.942249"
-  },
-  {
-   "interval_seconds": 86400,
-   "last": {
-    "annualized_long_rate": "0.04880",
-    "annualized_short_rate": "0.02880",
-    "interval_long_rate": "0.0001356",
-    "interval_short_rate": "0.00008000"
-   },
-   "long_oi": "2606345.4542940000000",
-   "mark_price": "52536.12",
-   "name": "Swap on US30 Spot",
-   "next": {
-    "annualized_long_rate": "0.04880",
-    "annualized_short_rate": "0.02880",
-    "interval_long_rate": "0.0001356",
-    "interval_short_rate": "0.00008000"
-   },
-   "next_timestamp": 1794521100,
-   "short_oi": "2681769.8867670000000",
-   "ticker": "US30-SWAP",
-   "volume_24h": "131208325.058525"
+   "volume_24h": "26905368.125391"
   },
   {
    "interval_seconds": 86400,
@@ -316,9 +228,9 @@
     "interval_long_rate": "0.0001356",
     "interval_short_rate": "0.00008000"
    },
-   "long_oi": "38748127.3831144000000",
-   "mark_price": "28126.57",
-   "name": "Swap on US Non-Financial 100",
+   "long_oi": "1271847.08765790000000",
+   "mark_price": "3728.76",
+   "name": "Swap on US MidCap Spot",
    "next": {
     "annualized_long_rate": "0.04880",
     "annualized_short_rate": "0.02880",
@@ -326,31 +238,97 @@
     "interval_short_rate": "0.00008000"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "24878428.1245008000000",
-   "ticker": "US100-SWAP",
-   "volume_24h": "803503231.614481"
+   "short_oi": "1236690.56189440000000",
+   "ticker": "US400-SWAP",
+   "volume_24h": "11654523.062194"
   },
   {
    "interval_seconds": 86400,
    "last": {
-    "annualized_long_rate": "0.1675",
-    "annualized_short_rate": "0.07255",
-    "interval_long_rate": "0.0004652",
-    "interval_short_rate": "0.0002015"
+    "annualized_long_rate": "-0.1629",
+    "annualized_short_rate": "-0.1629",
+    "interval_long_rate": "-0.0004526",
+    "interval_short_rate": "-0.0004526"
    },
-   "long_oi": "31862447.55688280000000",
-   "mark_price": "3944.05",
-   "name": "Swap on Gold Spot",
+   "long_oi": "124816.4349160000000000",
+   "mark_price": "2.5754",
+   "name": "Swap on Gasoline",
    "next": {
-    "annualized_long_rate": "0.05612",
-    "annualized_short_rate": "0.02356",
-    "interval_long_rate": "0.0001559",
-    "interval_short_rate": "0.00006544"
+    "annualized_long_rate": "-0.1443",
+    "annualized_short_rate": "-0.1443",
+    "interval_long_rate": "-0.0004007",
+    "interval_short_rate": "-0.0004007"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "8806095.38352720000000",
-   "ticker": "XAU-SWAP",
-   "volume_24h": "123876373.501166"
+   "short_oi": "143068.0637320000000000",
+   "ticker": "GASOL-SWAP",
+   "volume_24h": "2364554.528100"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "0.06465",
+    "annualized_short_rate": "0.06465",
+    "interval_long_rate": "0.0001796",
+    "interval_short_rate": "0.0001796"
+   },
+   "long_oi": "2668103.1279540000000000",
+   "mark_price": "6.2971",
+   "name": "Swap on Copper Spot",
+   "next": {
+    "annualized_long_rate": "0.06483",
+    "annualized_short_rate": "0.06483",
+    "interval_long_rate": "0.0001801",
+    "interval_short_rate": "0.0001801"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "377366.4152100000000000",
+   "ticker": "COPP-SWAP",
+   "volume_24h": "4843039.997584"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "-0.01274",
+    "annualized_short_rate": "-0.01274",
+    "interval_long_rate": "-0.00003538",
+    "interval_short_rate": "-0.00003538"
+   },
+   "long_oi": "1320542.575683500000000",
+   "mark_price": "102.634",
+   "name": "Swap on Dollar Index",
+   "next": {
+    "annualized_long_rate": "-0.01273",
+    "annualized_short_rate": "-0.01273",
+    "interval_long_rate": "-0.00003537",
+    "interval_short_rate": "-0.00003537"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "1647105.859275700000000",
+   "ticker": "DXI-SWAP",
+   "volume_24h": "21662763.595096"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "-0.2607",
+    "annualized_short_rate": "-0.2607",
+    "interval_long_rate": "-0.0007242",
+    "interval_short_rate": "-0.0007242"
+   },
+   "long_oi": "948285.844977800000000",
+   "mark_price": "90.953",
+   "name": "Swap on Brent Crude Oil",
+   "next": {
+    "annualized_long_rate": "-0.2399",
+    "annualized_short_rate": "-0.2399",
+    "interval_long_rate": "-0.0006663",
+    "interval_short_rate": "-0.0006663"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "1384963.125146000000000",
+   "ticker": "UKOIL-SWAP",
+   "volume_24h": "4720954.387137"
   },
   {
    "interval_seconds": 86400,
@@ -360,9 +338,9 @@
     "interval_long_rate": "0.0001356",
     "interval_short_rate": "0.00008000"
    },
-   "long_oi": "21417810.02517960000000",
-   "mark_price": "7587.67",
-   "name": "Swap on US 500",
+   "long_oi": "955186.29579900000000",
+   "mark_price": "2841.01",
+   "name": "Swap on US2K Spot",
    "next": {
     "annualized_long_rate": "0.04880",
     "annualized_short_rate": "0.02880",
@@ -370,9 +348,9 @@
     "interval_short_rate": "0.00008000"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "10475022.35473200000000",
-   "ticker": "US500-SWAP",
-   "volume_24h": "216814579.932254"
+   "short_oi": "950210.89571840000000",
+   "ticker": "US2K-SWAP",
+   "volume_24h": "22931396.499297"
   },
   {
    "interval_seconds": 86400,
@@ -382,9 +360,9 @@
     "interval_long_rate": "0.0001356",
     "interval_short_rate": "0.00008000"
    },
-   "long_oi": "2496653.412560000000",
-   "mark_price": "3709.3",
-   "name": "Swap on Taiwan Index",
+   "long_oi": "2542201.01939536000000",
+   "mark_price": "52489.5",
+   "name": "Swap on US30 Spot",
    "next": {
     "annualized_long_rate": "0.04880",
     "annualized_short_rate": "0.02880",
@@ -392,10 +370,32 @@
     "interval_short_rate": "0.00008000"
    },
    "next_timestamp": 1794521100,
-   "short_oi": "2475316.388630000000",
-   "ticker": "TWI-SWAP",
-   "volume_24h": "12339620.875185"
+   "short_oi": "2703165.17850264000000",
+   "ticker": "US30-SWAP",
+   "volume_24h": "130188927.821154"
+  },
+  {
+   "interval_seconds": 86400,
+   "last": {
+    "annualized_long_rate": "-0.1051",
+    "annualized_short_rate": "-0.1051",
+    "interval_long_rate": "-0.0002921",
+    "interval_short_rate": "-0.0002921"
+   },
+   "long_oi": "967914.740615000000000",
+   "mark_price": "18.719",
+   "name": "Swap on Volatility Index",
+   "next": {
+    "annualized_long_rate": "0.1716",
+    "annualized_short_rate": "0.1716",
+    "interval_long_rate": "0.0004768",
+    "interval_short_rate": "0.0004768"
+   },
+   "next_timestamp": 1794521100,
+   "short_oi": "95666.569685000000000",
+   "ticker": "VXI-SWAP",
+   "volume_24h": "5052027.695813"
   }
  ],
- "snap_ts": "2026-11-12T12:28:48Z"
+ "snap_ts": "2026-11-12T12:38:46Z"
 }
